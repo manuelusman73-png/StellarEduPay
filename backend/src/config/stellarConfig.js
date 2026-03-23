@@ -14,4 +14,6 @@ const networkPassphrase = isTestnet
 
 const SCHOOL_WALLET = process.env.SCHOOL_WALLET_ADDRESS;
 
-module.exports = { server, networkPassphrase, SCHOOL_WALLET, StellarSdk };
+const TRANSACTION_TIME_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+module.exports = { server, networkPassphrase, SCHOOL_WALLET, StellarSdk, TRANSACTION_TIME_WINDOW_MS };
