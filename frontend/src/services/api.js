@@ -7,5 +7,7 @@ export const getPaymentInstructions = (studentId) => api.get(`/payments/instruct
 export const getStudentPayments = (studentId) => api.get(`/payments/${studentId}`);
 export const verifyPayment = (txHash) => api.post('/payments/verify', { txHash });
 export const syncPayments = () => api.post('/payments/sync');
-export const getAcceptedAssets = () => api.get('/payments/accepted-assets');
+export const getFeeStructures = () => api.get('/fees');
+export const createFeeStructure = (data) => api.post('/fees', data);
+export const getFeeByClass = (className) => api.get(`/fees/${className}`);
 

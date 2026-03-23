@@ -57,8 +57,8 @@ export default function PaymentForm() {
 
       {student && instructions && (
         <div style={{ marginTop: '1.5rem', background: '#f5f5f5', padding: '1rem', borderRadius: 8 }}>
-          <p><strong>Student:</strong> {student.name} — {student.class}</p>
-          <p><strong>Fee Amount:</strong> {formatAssetAmount(student.feeAmount, 'XLM')}</p>
+          <p><strong>Student:</strong> {student.name} — Class {student.class}</p>
+          <p><strong>Required Fee:</strong> {student.feeAmount} XLM <span style={{ fontSize: '0.8rem', color: '#888' }}>(class fee)</span></p>
           <p><strong>Status:</strong> {student.feePaid ? '✅ Paid' : '❌ Unpaid'}</p>
           <hr />
           <p><strong>Send payment to:</strong></p>
