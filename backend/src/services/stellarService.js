@@ -1,4 +1,4 @@
-const { server, SCHOOL_WALLET, isAcceptedAsset } = require('../config/stellarConfig');
+const { server, SCHOOL_WALLET, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/stellarConfig');
 const Payment = require('../models/paymentModel');
 const Student = require('../models/studentModel');
 
@@ -54,6 +54,11 @@ async function syncPayments() {
     const paymentAmount = parseFloat(payOp.amount);
     const senderAddress = payOp.from || null;
     const txDate = new Date(tx.created_at);
+    const txLedger = tx.ledger_attr || tx.ledger || null;
+
+    // Check if transaction has met the confirmation threshold
+    const isConfirmed = txLedger ? await checkConfirmationStatus(txLedger) : false;
+    const confirmationStatus = isConfirmed ? 'confirmed' : 'pending_confirmation';
 
     // Detect memo collision before recording
     const collision = await detectMemoCollision(memo, senderAddress, paymentAmount, student.feeAmount, txDate);
@@ -92,11 +97,13 @@ async function syncPayments() {
       senderAddress,
       isSuspicious: collision.suspicious,
       suspicionReason: collision.reason,
+      ledger: txLedger,
+      confirmationStatus,
       confirmedAt: txDate,
     });
 
-    // Only update student balance if payment is not suspicious
-    if (!collision.suspicious) {
+    // Only update student balance if payment is confirmed and not suspicious
+    if (isConfirmed && !collision.suspicious) {
       await Student.findOneAndUpdate(
         { studentId: memo },
         {
@@ -133,6 +140,18 @@ async function verifyTransaction(txHash) {
     feeValidation,
     date: tx.created_at,
   };
+}
+
+/**
+ * Check whether a transaction has met the confirmation threshold.
+ * Fetches the latest ledger sequence and compares it against the tx ledger.
+ * @param {number} txLedger - the ledger sequence the transaction was included in
+ * @returns {Promise<boolean>}
+ */
+async function checkConfirmationStatus(txLedger) {
+  const latestLedger = await server.ledgers().order('desc').limit(1).call();
+  const latestSequence = latestLedger.records[0].sequence;
+  return (latestSequence - txLedger) >= CONFIRMATION_THRESHOLD;
 }
 
 /**
@@ -174,9 +193,12 @@ async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedF
 
   return { suspicious: false, reason: null };
 }
+
+/**
+ * Validate a payment amount against the expected fee.
  * @param {number} paymentAmount — the amount actually paid
  * @param {number} expectedFee — the fee the student owes
- * @returns {{ status: string, message: string }}
+ * @returns {{ status: string, excessAmount: number, message: string }}
  */
 function validatePaymentAgainstFee(paymentAmount, expectedFee) {
   if (paymentAmount < expectedFee) {
@@ -201,4 +223,41 @@ function validatePaymentAgainstFee(paymentAmount, expectedFee) {
   };
 }
 
-module.exports = { syncPayments, verifyTransaction, validatePaymentAgainstFee, detectMemoCollision };
+/**
+ * Re-check all pending_confirmation payments and promote them to confirmed
+ * once the ledger threshold has been met. Updates student balance on promotion.
+ */
+async function finalizeConfirmedPayments() {
+  const pending = await Payment.find({ confirmationStatus: 'pending_confirmation', isSuspicious: false });
+
+  for (const payment of pending) {
+    if (!payment.ledger) continue;
+
+    const isConfirmed = await checkConfirmationStatus(payment.ledger);
+    if (!isConfirmed) continue;
+
+    await Payment.findByIdAndUpdate(payment._id, { confirmationStatus: 'confirmed' });
+
+    // Recalculate and update student balance now that this payment is confirmed
+    const student = await Student.findOne({ studentId: payment.studentId });
+    if (!student) continue;
+
+    const agg = await Payment.aggregate([
+      { $match: { studentId: payment.studentId, confirmationStatus: 'confirmed', isSuspicious: false } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+    const totalPaid = agg.length ? parseFloat(agg[0].total.toFixed(7)) : 0;
+    const remainingBalance = parseFloat(Math.max(0, student.feeAmount - totalPaid).toFixed(7));
+
+    await Student.findOneAndUpdate(
+      { studentId: payment.studentId },
+      {
+        totalPaid,
+        remainingBalance,
+        feePaid: totalPaid >= student.feeAmount,
+      }
+    );
+  }
+}
+
+module.exports = { syncPayments, verifyTransaction, validatePaymentAgainstFee, detectMemoCollision, finalizeConfirmedPayments, checkConfirmationStatus };

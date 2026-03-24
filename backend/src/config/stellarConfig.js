@@ -57,12 +57,18 @@ function resolveAsset(assetCode) {
   return new StellarSdk.Asset(cfg.code, cfg.issuer);
 }
 
+// Minimum number of ledgers that must be closed after a transaction's ledger
+// before it is considered final. Stellar closes a ledger ~every 5 seconds;
+// 2 ledgers ≈ 10 seconds of additional safety margin.
+const CONFIRMATION_THRESHOLD = parseInt(process.env.CONFIRMATION_THRESHOLD || '2', 10);
+
 module.exports = {
   server,
   networkPassphrase,
   SCHOOL_WALLET,
   StellarSdk,
   ACCEPTED_ASSETS,
+  CONFIRMATION_THRESHOLD,
   isAcceptedAsset,
   resolveAsset,
 };

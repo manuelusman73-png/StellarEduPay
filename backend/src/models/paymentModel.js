@@ -11,6 +11,8 @@ const paymentSchema = new mongoose.Schema({
   senderAddress: { type: String, default: null },
   isSuspicious: { type: Boolean, default: false },
   suspicionReason: { type: String, default: null },
+  ledger: { type: Number, default: null },
+  confirmationStatus: { type: String, enum: ['pending_confirmation', 'confirmed'], default: 'pending_confirmation' },
   confirmedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 
