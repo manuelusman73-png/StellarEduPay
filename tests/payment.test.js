@@ -19,6 +19,9 @@ jest.mock('../backend/src/models/paymentModel', () => ({
   create: jest.fn().mockResolvedValue({}),
 }));
 
+jest.mock('../backend/src/models/feeStructureModel', () => ({
+  create: jest.fn().mockResolvedValue({ className: '5A', feeAmount: 200, description: 'Class 5A fees', academicYear: '2026', isActive: true }),
+  find: jest.fn().mockReturnValue({ sort: jest.fn().mockResolvedValue([
 jest.mock('../backend/src/models/paymentIntentModel', () => ({
   create: jest.fn().mockResolvedValue({ studentId: 'STU001', amount: 200, memo: 'ABCD123', status: 'pending' }),
   findOne: jest.fn().mockResolvedValue({ studentId: 'STU001', amount: 200, memo: 'ABCD123', status: 'pending' }),
@@ -143,7 +146,8 @@ describe('Student API', () => {
     expect(res.body).toHaveProperty('code', 'DUPLICATE_TX');
   });
 
-  test('POST /api/payments/sync returns success message', async () => {
+describe('Payment API', () => {
+  test('POST /api/payments/sync — returns success', async () => {
     const res = await request(app).post('/api/payments/sync');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('message', 'Sync complete');
@@ -170,6 +174,14 @@ describe('Fee Structure API', () => {
     const res = await request(app).post('/api/fees').send({ className: '5A', feeAmount: 200 });
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ className: '5A', feeAmount: 200 });
+  });
+
+  test('POST /api/fees — 400 when required fields missing', async () => {
+    const res = await request(app).post('/api/fees').send({ description: 'No class' });
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error');
+  });
+
   });
 
   test('POST /api/fees — 400 when required fields missing', async () => {
