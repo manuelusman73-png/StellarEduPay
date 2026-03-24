@@ -5,10 +5,14 @@
     "test": "jest --testPathPattern=tests/ --forceExit"
   },
   "devDependencies": {
+    "dotenv": "^17.3.1",
     "jest": "^29.0.0",
+    "mongoose": "^9.3.1",
     "supertest": "^6.3.0"
   },
   "jest": {
-    "modulePaths": ["backend/node_modules"]
+    "modulePaths": [
+      "backend/node_modules"
+    ]
   }
 }

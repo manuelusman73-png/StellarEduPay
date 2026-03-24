@@ -1,11 +1,13 @@
 const FeeStructure = require('../models/feeStructureModel');
 
-// POST /api/fees — create or update a fee structure for a class
-async function createFeeStructure(req, res) {
+// POST /api/fees
+async function createFeeStructure(req, res, next) {
   try {
     const { className, feeAmount, description, academicYear } = req.body;
     if (!className || feeAmount == null) {
-      return res.status(400).json({ error: 'className and feeAmount are required' });
+      const err = new Error('className and feeAmount are required');
+      err.code = 'VALIDATION_ERROR';
+      return next(err);
     }
     const fee = await FeeStructure.findOneAndUpdate(
       { className },
@@ -14,43 +16,51 @@ async function createFeeStructure(req, res) {
     );
     res.status(201).json(fee);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 }
 
-// GET /api/fees — list all fee structures
-async function getAllFeeStructures(req, res) {
+// GET /api/fees
+async function getAllFeeStructures(req, res, next) {
   try {
     const fees = await FeeStructure.find({ isActive: true }).sort({ className: 1 });
     res.json(fees);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 }
 
-// GET /api/fees/:className — get fee structure for a specific class
-async function getFeeByClass(req, res) {
+// GET /api/fees/:className
+async function getFeeByClass(req, res, next) {
   try {
     const fee = await FeeStructure.findOne({ className: req.params.className, isActive: true });
-    if (!fee) return res.status(404).json({ error: `No fee structure found for class ${req.params.className}` });
+    if (!fee) {
+      const err = new Error(`No fee structure found for class ${req.params.className}`);
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
     res.json(fee);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 }
 
-// DELETE /api/fees/:className — deactivate a fee structure
-async function deleteFeeStructure(req, res) {
+// DELETE /api/fees/:className
+async function deleteFeeStructure(req, res, next) {
   try {
     const fee = await FeeStructure.findOneAndUpdate(
       { className: req.params.className },
       { isActive: false },
       { new: true }
     );
-    if (!fee) return res.status(404).json({ error: 'Fee structure not found' });
+    if (!fee) {
+      const err = new Error('Fee structure not found');
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
     res.json({ message: `Fee structure for class ${req.params.className} deactivated` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 }
 

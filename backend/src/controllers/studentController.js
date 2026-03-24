@@ -1,56 +1,52 @@
 const Student = require('../models/studentModel');
 const FeeStructure = require('../models/feeStructureModel');
 
-// POST /api/students — register a new student, auto-assign fee from fee structure
-async function registerStudent(req, res) {
+// POST /api/students
+async function registerStudent(req, res, next) {
   try {
     const { studentId, name, class: className, feeAmount } = req.body;
 
-    // If feeAmount is not explicitly provided, look up the fee structure for the class
     let assignedFee = feeAmount;
     if (assignedFee == null && className) {
       const feeStructure = await FeeStructure.findOne({ className, isActive: true });
-      if (feeStructure) {
-        assignedFee = feeStructure.feeAmount;
-      }
+      if (feeStructure) assignedFee = feeStructure.feeAmount;
     }
 
     if (assignedFee == null) {
-      return res.status(400).json({
-        error: `No fee amount provided and no fee structure found for class "${className}". Please create a fee structure first or provide feeAmount.`,
-      });
+      const err = new Error(`No fee amount provided and no fee structure found for class "${className}". Please create a fee structure first or provide feeAmount.`);
+      err.code = 'VALIDATION_ERROR';
+      return next(err);
     }
 
-    const student = await Student.create({
-      studentId,
-      name,
-      class: className,
-      feeAmount: assignedFee,
-    });
+    const student = await Student.create({ studentId, name, class: className, feeAmount: assignedFee });
     res.status(201).json(student);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    next(err);
   }
 }
 
 // GET /api/students
-async function getAllStudents(req, res) {
+async function getAllStudents(req, res, next) {
   try {
     const students = await Student.find().sort({ createdAt: -1 });
     res.json(students);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 }
 
 // GET /api/students/:studentId
-async function getStudent(req, res) {
+async function getStudent(req, res, next) {
   try {
     const student = await Student.findOne({ studentId: req.params.studentId });
-    if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (!student) {
+      const err = new Error('Student not found');
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
     res.json(student);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 }
 

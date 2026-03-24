@@ -5,6 +5,8 @@ const studentSchema = new mongoose.Schema({
   name: { type: String, required: true },
   class: { type: String, required: true },
   feeAmount: { type: Number, required: true },
+  totalPaid: { type: Number, default: 0 },
+  remainingBalance: { type: Number, default: null },
   feePaid: { type: Boolean, default: false },
 }, { timestamps: true });
 
