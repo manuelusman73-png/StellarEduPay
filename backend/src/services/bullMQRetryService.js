@@ -1,0 +1,462 @@
+/**
+ * BullMQ Transaction Retry Service
+ * 
+ * This service provides a high-level interface for adding failed Stellar transactions
+ * to the BullMQ retry queue. It integrates with the existing retry mechanism and
+ * provides additional features like automatic error classification and retry scheduling.
+ */
+
+const {
+  initializeQueue,
+  addTransactionToRetryQueue,
+  getQueueStats,
+  getDLQStats,
+  shutdownQueue,
+  config,
+  QUEUE_NAMES,
+} = require('../queue/transactionRetryQueue');
+
+const PendingVerification = require('../models/pendingVerificationModel');
+
+// Singleton queue instance
+let queueInstance = null;
+
+/**
+ * Error classification for retry decisions
+ */
+const ERROR_CLASSIFICATION = {
+  TRANSIENT: [
+    'STELLAR_NETWORK_ERROR',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'ENOTFOUND',
+    'NETWORK_ERROR',
+    'SOCKET_TIMEOUT',
+    'REQUEST_TIMEOUT',
+    'HORIZON_UNAVAILABLE',
+  ],
+  PERMANENT: [
+    'TX_FAILED',
+    'MISSING_MEMO',
+    'INVALID_DESTINATION',
+    'UNSUPPORTED_ASSET',
+    'DUPLICATE_TX',
+    'INVALID_TRANSACTION_HASH',
+    'TRANSACTION_NOT_FOUND',
+  ],
+};
+
+/**
+ * Classify error type for retry decision
+ */
+function classifyError(error) {
+  const errorCode = error.code || '';
+  const errorMessage = error.message || '';
+  
+  if (ERROR_CLASSIFICATION.PERMANENT.includes(errorCode)) {
+    return 'permanent';
+  }
+  
+  if (ERROR_CLASSIFICATION.TRANSIENT.includes(errorCode)) {
+    return 'transient';
+  }
+  
+  // Check error message for transient indicators
+  const transientPatterns = [
+    /network/i,
+    /timeout/i,
+    /connection/i,
+    /unavailable/i,
+    /temporary/i,
+  ];
+  
+  for (const pattern of transientPatterns) {
+    if (pattern.test(errorMessage)) {
+      return 'transient';
+    }
+  }
+  
+  return 'unknown';
+}
+
+/**
+ * Initialize the queue system
+ */
+async function initializeRetryQueue() {
+  if (!queueInstance) {
+    queueInstance = await initializeQueue();
+    console.log('[BullMQRetryService] Queue system initialized');
+  }
+  return queueInstance;
+}
+
+/**
+ * Queue a failed transaction for retry with smart error handling
+ * 
+ * @param {string} transactionHash - The Stellar transaction hash
+ * @param {Object} options - Additional options
+ * @param {string} options.studentId - Student ID associated with the transaction
+ * @param {string} options.memo - Transaction memo
+ * @param {Error} options.error - The original error that caused the failure
+ * @param {Object} options.metadata - Additional metadata to store with the job
+ */
+async function queueFailedTransaction(transactionHash, options = {}) {
+  try {
+    await initializeRetryQueue();
+    
+    const { studentId, memo, error, metadata = {} } = options;
+    
+    // Classify the error to determine retry strategy
+    const errorType = error ? classifyError(error) : 'unknown';
+    
+    // If it's a permanent error, don't queue for retry
+    if (errorType === 'permanent') {
+      console.log(`[BullMQRetryService] Permanent error detected for ${transactionHash}, not queueing for retry`);
+      return {
+        queued: false,
+        reason: 'permanent_error',
+        errorCode: error?.code || 'UNKNOWN',
+      };
+    }
+    
+    // Also store in MongoDB for tracking and potential recovery
+    await PendingVerification.findOneAndUpdate(
+      { txHash: transactionHash },
+      {
+        $setOnInsert: { 
+          txHash: transactionHash, 
+          studentId,
+          memo,
+        },
+        $set: {
+          status: 'queued',
+          lastError: error?.message || 'Unknown error',
+          lastErrorCode: error?.code || 'UNKNOWN',
+          errorType,
+          nextRetryAt: new Date(),
+        },
+        $inc: { attempts: 1 },
+      },
+      { upsert: true, new: true }
+    );
+    
+    // Add to BullMQ queue
+    const job = await addTransactionToRetryQueue(transactionHash, studentId, {
+      memo,
+      originalError: error?.message,
+      originalErrorCode: error?.code,
+      errorType,
+      metadata,
+      queuedAt: new Date().toISOString(),
+    });
+    
+    console.log(`[BullMQRetryService] Queued transaction ${transactionHash} for retry (attempt ${metadata.attemptNumber || 1})`);
+    
+    return {
+      queued: true,
+      jobId: job?.id,
+      errorType,
+      transactionHash,
+    };
+    
+  } catch (error) {
+    console.error(`[BullMQRetryService] Failed to queue transaction ${transactionHash}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get comprehensive queue statistics
+ */
+async function getRetryQueueStats() {
+  try {
+    const [mainStats, dlqStats] = await Promise.all([
+      getQueueStats(),
+      getDLQStats(),
+    ]);
+    
+    // Get MongoDB pending verification stats
+    const mongoStats = await PendingVerification.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+    
+    return {
+      bullmq: mainStats,
+      deadLetter: dlqStats,
+      mongodb: {
+        pendingVerifications: mongoStats.reduce((acc, item) => {
+          acc[item._id] = item.count;
+          return acc;
+        }, {}),
+      },
+      systemHealth: {
+        queueHealth: mainStats.health,
+        redisConnected: mainStats.health === 'healthy',
+        workerConcurrency: config.worker.concurrency,
+      },
+    };
+    
+  } catch (error) {
+    console.error('[BullMQRetryService] Failed to get queue stats:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get specific job details
+ */
+async function getJobDetails(jobId) {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    const job = await queue.getJob(jobId);
+    
+    if (!job) {
+      return null;
+    }
+    
+    const state = await job.getState();
+    const progress = job.progress;
+    const data = job.data;
+    const result = job.returnvalue;
+    const failedReason = job.failedReason;
+    
+    return {
+      jobId: job.id,
+      transactionHash: data.transactionHash,
+      state,
+      progress,
+      data,
+      result,
+      failedReason,
+      attemptsMade: job.attemptsMade,
+      maxAttempts: job.opts.attempts,
+      createdAt: job.timestamp,
+      processedOn: job.processedOn,
+      finishedOn: job.finishedOn,
+    };
+    
+  } catch (error) {
+    console.error(`[BullMQRetryService] Failed to get job details for ${jobId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get jobs by state
+ */
+async function getJobsByState(state, limit = 50) {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    
+    let jobs = [];
+    
+    switch (state) {
+      case 'waiting':
+        jobs = await queue.getWaiting(0, limit);
+        break;
+      case 'active':
+        jobs = await queue.getActive(0, limit);
+        break;
+      case 'completed':
+        jobs = await queue.getCompleted(0, limit);
+        break;
+      case 'failed':
+        jobs = await queue.getFailed(0, limit);
+        break;
+      case 'delayed':
+        jobs = await queue.getDelayed(0, limit);
+        break;
+      default:
+        throw new Error(`Invalid state: ${state}`);
+    }
+    
+    return jobs.map(job => ({
+      jobId: job.id,
+      transactionHash: job.data.transactionHash,
+      state: state,
+      attemptsMade: job.attemptsMade,
+      createdAt: new Date(job.timestamp).toISOString(),
+      data: job.data,
+    }));
+    
+  } catch (error) {
+    console.error(`[BullMQRetryService] Failed to get jobs by state ${state}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Retry a specific failed job immediately
+ */
+async function retryJobImmediately(jobId) {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    const job = await queue.getJob(jobId);
+    
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const state = await job.getState();
+    if (state !== 'failed') {
+      throw new Error(`Job ${jobId} is not in failed state (current: ${state})`);
+    }
+    
+    await job.retry();
+    
+    console.log(`[BullMQRetryService] Retrying job ${jobId} immediately`);
+    
+    return {
+      success: true,
+      jobId,
+      message: 'Job queued for immediate retry',
+    };
+    
+  } catch (error) {
+    console.error(`[BullMQRetryService] Failed to retry job ${jobId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Remove a job from the queue
+ */
+async function removeJob(jobId) {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    const job = await queue.getJob(jobId);
+    
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    await job.remove();
+    
+    console.log(`[BullMQRetryService] Removed job ${jobId}`);
+    
+    return {
+      success: true,
+      jobId,
+    };
+    
+  } catch (error) {
+    console.error(`[BullMQRetryService] Failed to remove job ${jobId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Clean up old completed jobs
+ */
+async function cleanupOldJobs(maxAge = 86400000) {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    
+    const count = await queue.clean(maxAge, 1000, 'completed');
+    
+    console.log(`[BullMQRetryService] Cleaned up ${count} old completed jobs`);
+    
+    return {
+      cleaned: count,
+      maxAge,
+    };
+    
+  } catch (error) {
+    console.error('[BullMQRetryService] Failed to cleanup old jobs:', error);
+    throw error;
+  }
+}
+
+/**
+ * Pause the queue
+ */
+async function pauseQueue() {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    await queue.pause();
+    
+    console.log('[BullMQRetryService] Queue paused');
+    
+    return { success: true, paused: true };
+    
+  } catch (error) {
+    console.error('[BullMQRetryService] Failed to pause queue:', error);
+    throw error;
+  }
+}
+
+/**
+ * Resume the queue
+ */
+async function resumeQueue() {
+  try {
+    await initializeRetryQueue();
+    const queue = queueInstance.queue;
+    await queue.resume();
+    
+    console.log('[BullMQRetryService] Queue resumed');
+    
+    return { success: true, paused: false };
+    
+  } catch (error) {
+    console.error('[BullMQRetryService] Failed to resume queue:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get health status
+ */
+async function getHealthStatus() {
+  try {
+    const stats = await getRetryQueueStats();
+    
+    return {
+      healthy: stats.systemHealth.queueHealth === 'healthy',
+      status: stats.systemHealth.queueHealth,
+      details: {
+        redis: stats.systemHealth.redisConnected ? 'connected' : 'disconnected',
+        workerConcurrency: stats.systemHealth.workerConcurrency,
+        queueSize: stats.bullmq.metrics.totalJobs,
+        failedJobs: stats.bullmq.metrics.failedJobs,
+        deadLetteredJobs: stats.deadLetter.metrics?.failed || 0,
+      },
+    };
+    
+  } catch (error) {
+    return {
+      healthy: false,
+      status: 'unhealthy',
+      error: error.message,
+    };
+  }
+}
+
+module.exports = {
+  initializeRetryQueue,
+  queueFailedTransaction,
+  getRetryQueueStats,
+  getJobDetails,
+  getJobsByState,
+  retryJobImmediately,
+  removeJob,
+  cleanupOldJobs,
+  pauseQueue,
+  resumeQueue,
+  getHealthStatus,
+  classifyError,
+  shutdownQueue,
+  ERROR_CLASSIFICATION,
+  QUEUE_NAMES,
+};
