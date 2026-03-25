@@ -189,6 +189,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     INVALID_DESTINATION:    400,
     UNSUPPORTED_ASSET:      400,
     VALIDATION_ERROR:       400,
+    UNDERPAID:              400,
     MISSING_SCHOOL_CONTEXT: 400,
     MISSING_IDEMPOTENCY_KEY:400,
     DUPLICATE_TX:           409,

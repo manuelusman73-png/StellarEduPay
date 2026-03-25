@@ -31,7 +31,7 @@ const { getPaymentLimits } = require('../utils/paymentLimits');
 const crypto = require('crypto');
 
 // Permanent error codes that should NOT be retried
-const PERMANENT_FAIL_CODES = ['TX_FAILED', 'MISSING_MEMO', 'INVALID_DESTINATION', 'UNSUPPORTED_ASSET', 'AMOUNT_TOO_LOW', 'AMOUNT_TOO_HIGH'];
+const PERMANENT_FAIL_CODES = ['TX_FAILED', 'MISSING_MEMO', 'INVALID_DESTINATION', 'UNSUPPORTED_ASSET', 'AMOUNT_TOO_LOW', 'AMOUNT_TOO_HIGH', 'UNDERPAID'];
 const { ACCEPTED_ASSETS } = require('../config/stellarConfig');
 const { getPaymentLimits } = require('../utils/paymentLimits');
 const {
@@ -39,7 +39,7 @@ const {
   enrichPaymentWithConversion,
 } = require('../services/currencyConversionService');
 
-const PERMANENT_FAIL_CODES = ['TX_FAILED', 'MISSING_MEMO', 'INVALID_DESTINATION', 'UNSUPPORTED_ASSET', 'AMOUNT_TOO_LOW', 'AMOUNT_TOO_HIGH'];
+const PERMANENT_FAIL_CODES = ['TX_FAILED', 'MISSING_MEMO', 'INVALID_DESTINATION', 'UNSUPPORTED_ASSET', 'AMOUNT_TOO_LOW', 'AMOUNT_TOO_HIGH', 'UNDERPAID'];
 
 function wrapStellarError(err) {
   if (!err.code) {
@@ -295,6 +295,20 @@ async function verifyPayment(req, res, next) {
       studentId: studentObj._id,
     // Persist the verified payment
     const now = new Date();
+
+    // Reject underpaid transactions — do not record as SUCCESS
+    if (result.feeValidation.status === 'underpaid') {
+      const err = new Error(result.feeValidation.message);
+      err.code = 'UNDERPAID';
+      err.status = 400;
+      err.details = {
+        paid: result.amount,
+        required: result.feeAmount,
+        shortfall: parseFloat((result.feeAmount - result.amount).toFixed(7)),
+      };
+      return next(err);
+    }
+
     await recordPayment({
       schoolId,
       studentId: result.studentId || result.memo,
