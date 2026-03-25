@@ -6,7 +6,7 @@ process.env.SCHOOL_WALLET_ADDRESS = 'GTEST123';
 
 const {
   verifyTransaction,
-  syncPayments,
+  syncPaymentsForSchool,
   validatePaymentAgainstFee,
   detectAsset,
   normalizeAmount,
@@ -143,7 +143,7 @@ describe('extractValidPayment', () => {
 
   test('returns payOp, memo, asset for a valid transaction', async () => {
     const tx = { successful: true, memo: 'STU001', operations: validOps };
-    const result = await extractValidPayment(tx);
+    const result = await extractValidPayment(tx, 'GTEST123');
     expect(result).not.toBeNull();
     expect(result.memo).toBe('STU001');
     expect(result.asset.assetCode).toBe('XLM');
@@ -151,17 +151,17 @@ describe('extractValidPayment', () => {
 
   test('returns null for a failed transaction', async () => {
     const tx = { successful: false, memo: 'STU001', operations: validOps };
-    expect(await extractValidPayment(tx)).toBeNull();
+    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
   });
 
   test('returns null when memo is missing', async () => {
     const tx = { successful: true, memo: undefined, operations: validOps };
-    expect(await extractValidPayment(tx)).toBeNull();
+    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
   });
 
   test('returns null when memo is empty string', async () => {
     const tx = { successful: true, memo: '   ', operations: validOps };
-    expect(await extractValidPayment(tx)).toBeNull();
+    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
   });
 
   test('returns null when no payment op to school wallet', async () => {
@@ -170,7 +170,7 @@ describe('extractValidPayment', () => {
       memo: 'STU001',
       operations: async () => ({ records: [{ type: 'payment', to: 'GOTHER', amount: '100.0', asset_type: 'native' }] }),
     };
-    expect(await extractValidPayment(tx)).toBeNull();
+    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
   });
 
   test('returns null for unsupported asset', async () => {
@@ -181,7 +181,7 @@ describe('extractValidPayment', () => {
         records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'credit_alphanum4', asset_code: 'SHIB', asset_issuer: 'GRANDOM' }],
       }),
     };
-    expect(await extractValidPayment(tx)).toBeNull();
+    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
   });
 });
 
@@ -196,28 +196,28 @@ describe('verifyTransaction', () => {
     mockOperations.mockResolvedValue({
       records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'native' }],
     });
-    const result = await verifyTransaction('abc123');
+    const result = await verifyTransaction('abc123', 'GTEST123');
     expect(result).toMatchObject({ hash: 'abc123', memo: 'STU001', amount: 100, assetCode: 'XLM', assetType: 'native' });
     expect(result.feeValidation.status).toBe('valid');
   });
 
-  test('returns null when no matching payment op', async () => {
+  test('throws INVALID_DESTINATION when no matching payment op', async () => {
     mockOperations.mockResolvedValue({ records: [] });
-    expect(await verifyTransaction('abc123')).toBeNull();
+    await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'INVALID_DESTINATION' });
   });
 
-  test('returns null when payment is to a different wallet', async () => {
+  test('throws INVALID_DESTINATION when payment is to a different wallet', async () => {
     mockOperations.mockResolvedValue({
       records: [{ type: 'payment', to: 'GOTHER999', amount: '100.0', asset_type: 'native' }],
     });
-    expect(await verifyTransaction('abc123')).toBeNull();
+    await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'INVALID_DESTINATION' });
   });
 
-  test('returns null for unsupported asset', async () => {
+  test('throws UNSUPPORTED_ASSET for unsupported asset', async () => {
     mockOperations.mockResolvedValue({
       records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'credit_alphanum4', asset_code: 'SHIB', asset_issuer: 'GRANDOM' }],
     });
-    expect(await verifyTransaction('abc123')).toBeNull();
+    await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'UNSUPPORTED_ASSET' });
   });
 
   test('feeValidation status is unknown when student not found', async () => {
@@ -225,15 +225,16 @@ describe('verifyTransaction', () => {
     mockOperations.mockResolvedValue({
       records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'native' }],
     });
-    const result = await verifyTransaction('abc123');
+    const result = await verifyTransaction('abc123', 'GTEST123');
     expect(result.feeValidation.status).toBe('unknown');
   });
 });
 
 // ─── syncPayments ─────────────────────────────────────────────────────────────
 
-describe('syncPayments', () => {
+describe('syncPaymentsForSchool', () => {
   test('resolves without error when no transactions exist', async () => {
-    await expect(syncPayments()).resolves.toBeUndefined();
+    const school = { schoolId: 'SCH001', stellarAddress: 'GTEST123' };
+    await expect(syncPaymentsForSchool(school)).resolves.toBeUndefined();
   });
 });

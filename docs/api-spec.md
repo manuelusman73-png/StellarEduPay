@@ -18,6 +18,36 @@ All error responses follow a consistent envelope (see [Error Responses](#error-r
 
 ---
 
+## Idempotency
+
+`POST /api/payments/intent` and `POST /api/payments/verify` require an `Idempotency-Key` header. Use any unique string (e.g. a UUID). The server caches the response for 24 hours — sending the same key again returns the cached result without re-processing.
+
+```
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+```
+
+Missing the header returns:
+
+```json
+HTTP 400
+{ "error": "Idempotency-Key header is required for this request", "code": "MISSING_IDEMPOTENCY_KEY" }
+```
+
+---
+
+## Health
+
+### Health check
+```
+GET /health
+```
+Response `200`:
+```json
+{ "status": "ok" }
+```
+
+---
+
 ## Students
 
 ### Register a Student
@@ -93,6 +123,7 @@ curl -X POST http://localhost:5000/api/students \
 ```
 GET /api/students
 ```
+Response `200`: array of student objects, sorted by `createdAt` descending.
 
 Returns all registered students, sorted by most recently created.
 
@@ -127,6 +158,60 @@ curl http://localhost:5000/api/students
 ```
 GET /api/students/:studentId
 ```
+Response `200`: student object.
+
+Errors:
+- `400` — invalid `studentId` format (must be 3–20 alphanumeric characters)
+- `404` — student not found
+
+---
+
+## Fee Structures
+
+### Create / update a fee structure
+```
+POST /api/fees
+```
+Body:
+```json
+{ "className": "5A", "feeAmount": 250, "description": "Grade 5A annual fees", "academicYear": "2026" }
+```
+`description` and `academicYear` are optional. If a fee structure for the class already exists it is updated (upsert).
+
+Response `201`:
+```json
+{ "className": "5A", "feeAmount": 250, "description": "Grade 5A annual fees", "academicYear": "2026", "isActive": true }
+```
+
+Errors:
+- `400` — `className` or `feeAmount` missing/invalid
+
+### List all fee structures
+```
+GET /api/fees
+```
+Response `200`: array of active fee structures, sorted by `className`.
+
+### Get fee for a class
+```
+GET /api/fees/:className
+```
+Response `200`: fee structure object.
+
+Errors:
+- `404` — no active fee structure found for the class
+
+### Deactivate a fee structure
+```
+DELETE /api/fees/:className
+```
+Response `200`:
+```json
+{ "message": "Fee structure for class 5A deactivated" }
+```
+
+Errors:
+- `404` — fee structure not found
 
 **Path parameter**
 
@@ -581,6 +666,7 @@ curl -X POST http://localhost:5000/api/payments/finalize
 ```
 GET /api/payments/:studentId
 ```
+Response `200`: array of payment objects, sorted by `confirmedAt` descending.
 
 Returns all recorded payments for a student, sorted by most recently confirmed.
 
@@ -666,8 +752,12 @@ curl http://localhost:5000/api/payments/balance/STU001
 ### List Accepted Assets
 
 ```
-GET /api/payments/accepted-assets
+
+### Get student balance
 ```
+GET /api/payments/balance/:studentId
+```
+Returns the cumulative payment summary for a student, aggregated across all confirmed payments.
 
 Returns the list of Stellar assets the school wallet accepts.
 
@@ -721,6 +811,7 @@ curl http://localhost:5000/api/payments/limits
 ```
 GET /api/payments/overpayments
 ```
+Returns payments flagged as suspicious (memo collision or unusual amount).
 
 Returns all payments where the amount exceeded the required fee, along with the
 total excess collected.
@@ -767,6 +858,7 @@ patterns). Intended for admin review.
 ```bash
 curl http://localhost:5000/api/payments/suspicious
 ```
+Returns payments with `confirmationStatus: "pending_confirmation"`.
 
 **Response `200 OK`**
 
@@ -1024,3 +1116,16 @@ instead of a single `error` string:
   ]
 }
 ```
+
+| Code | HTTP Status | Description |
+|---|---|---|
+| `VALIDATION_ERROR` | 400 | Invalid request body or params |
+| `MISSING_IDEMPOTENCY_KEY` | 400 | `Idempotency-Key` header missing |
+| `TX_FAILED` | 400 | Stellar transaction failed on-chain |
+| `MISSING_MEMO` | 400 | Transaction has no memo |
+| `INVALID_DESTINATION` | 400 | Payment not sent to school wallet |
+| `UNSUPPORTED_ASSET` | 400 | Asset not in accepted list |
+| `NOT_FOUND` | 404 | Resource not found |
+| `DUPLICATE_TX` | 409 | Transaction already processed |
+| `STELLAR_NETWORK_ERROR` | 502 | Horizon API unreachable |
+| `INTERNAL_ERROR` | 500 | Unexpected server error |

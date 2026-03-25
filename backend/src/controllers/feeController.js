@@ -33,9 +33,8 @@ async function getAllFeeStructures(req, res, next) {
     const cached = get(cacheKey);
     if (cached !== undefined) return res.json(cached);
 
-    const fees = await FeeStructure.find({ isActive: true }).sort({ className: 1 });
-    set(cacheKey, fees, TTL.FEES);
     const fees = await FeeStructure.find({ schoolId: req.schoolId, isActive: true }).sort({ className: 1 });
+    set(cacheKey, fees, TTL.FEES);
     res.json(fees);
   } catch (err) {
     next(err);
@@ -50,7 +49,6 @@ async function getFeeByClass(req, res, next) {
     const cached = get(cacheKey);
     if (cached !== undefined) return res.json(cached);
 
-    const fee = await FeeStructure.findOne({ className, isActive: true });
     const fee = await FeeStructure.findOne({
       schoolId: req.schoolId,
       className: req.params.className,
@@ -73,7 +71,6 @@ async function deleteFeeStructure(req, res, next) {
   try {
     const { className } = req.params;
     const fee = await FeeStructure.findOneAndUpdate(
-      { className },
       { schoolId: req.schoolId, className: req.params.className },
       { isActive: false },
       { new: true }

@@ -38,6 +38,7 @@ function startPolling() {
 
   run(); // immediate first run
   _timer = setInterval(run, POLL_INTERVAL_MS);
+  _timer.unref(); // don't keep the process alive (e.g. during tests)
 }
 
 function stopPolling() {

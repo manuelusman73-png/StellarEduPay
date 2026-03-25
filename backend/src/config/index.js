@@ -9,14 +9,7 @@
  * (scripts/migrate-default-school.js) which seeds the first school from it.
  */
 
-'use strict';
-
 // ── Required variables ────────────────────────────────────────────────────────
-const REQUIRED = [
-  'MONGO_URI',
-  'SCHOOL_WALLET_ADDRESS',
-  'STELLAR_NETWORK_PASSPHRASE',
-];
 const REQUIRED = ['MONGO_URI'];
 
 const missing = REQUIRED.filter((key) => !process.env[key]);
@@ -49,9 +42,6 @@ const USDC_ISSUER =
 
 const CONFIRMATION_THRESHOLD = parseInt(process.env.CONFIRMATION_THRESHOLD || '2', 10);
 const POLL_INTERVAL_MS       = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
-
-// ── Polling ───────────────────────────────────────────────────────────────────
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
 
 // ── Retry Service ─────────────────────────────────────────────────────────────
 const RETRY_INTERVAL_MS = parseInt(process.env.RETRY_INTERVAL_MS || '60000', 10);

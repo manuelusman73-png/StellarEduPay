@@ -729,6 +729,8 @@ StellarEduPay includes comprehensive test coverage for all core functionality.
 
 ### Run All Tests
 
+Tests mock both the Stellar SDK and MongoDB — no real network or database required.
+
 ```bash
 # From the project root — install root dependencies first if you haven't already
 npm install
@@ -737,6 +739,7 @@ npm test
 ```
 
 Expected output:
+
 ```
 PASS tests/stellar.test.js
 PASS tests/payment.test.js

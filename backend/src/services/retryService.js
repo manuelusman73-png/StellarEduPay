@@ -17,8 +17,6 @@ const config = require('../config/index');
 
 const RETRY_INTERVAL_MS = config.RETRY_INTERVAL_MS;
 const MAX_ATTEMPTS = config.RETRY_MAX_ATTEMPTS;
-const RETRY_INTERVAL_MS = parseInt(process.env.RETRY_INTERVAL_MS, 10) || 60_000;
-const MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS, 10) || 10;
 
 // Exponential backoff: 1m, 2m, 4m … capped at 60 minutes
 function nextRetryDelay(attempts) {

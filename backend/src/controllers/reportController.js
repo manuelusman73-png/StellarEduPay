@@ -32,11 +32,9 @@ async function getReport(req, res, next) {
     const cacheKey = KEYS.report(startDate, endDate);
     let report = get(cacheKey);
     if (report === undefined) {
-      report = await generateReport({ startDate, endDate });
+      report = await generateReport({ schoolId: req.schoolId, startDate, endDate });
       set(cacheKey, report, TTL.REPORT);
     }
-    // Pass schoolId so report is scoped to this school only
-    const report = await generateReport({ schoolId: req.schoolId, startDate, endDate });
 
     if (format === 'csv') {
       const csv = reportToCsv(report);
