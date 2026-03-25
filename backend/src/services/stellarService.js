@@ -68,12 +68,12 @@ async function checkConfirmationStatus(txLedger) {
   return (latestSequence - txLedger) >= CONFIRMATION_THRESHOLD;
 }
 
-async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedFee, txDate) {
+async function detectMemoCollision(studentObjId, senderAddress, paymentAmount, expectedFee, txDate) {
   const COLLISION_WINDOW_MS = 24 * 60 * 60 * 1000;
   const windowStart = new Date(txDate.getTime() - COLLISION_WINDOW_MS);
 
   const recentFromOtherSender = await Payment.findOne({
-    studentId: memo,
+    studentId: studentObjId,
     senderAddress: { $ne: senderAddress, $ne: null },
     confirmedAt: { $gte: windowStart },
   });
@@ -81,7 +81,7 @@ async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedF
   if (recentFromOtherSender) {
     return {
       suspicious: true,
-      reason: `Memo "${memo}" was used by a different sender (${recentFromOtherSender.senderAddress}) within the last 24 hours`,
+      reason: `The student ID was used by a different sender (${recentFromOtherSender.senderAddress}) within the last 24 hours`,
     };
   }
 
@@ -126,10 +126,10 @@ async function syncPayments() {
     const isConfirmed = txLedger ? await checkConfirmationStatus(txLedger) : false;
     const confirmationStatus = isConfirmed ? 'confirmed' : 'pending_confirmation';
 
-    const collision = await detectMemoCollision(memo, senderAddress, paymentAmount, student.feeAmount, txDate);
+    const collision = await detectMemoCollision(student._id, senderAddress, paymentAmount, student.feeAmount, txDate);
 
     const previousPayments = await Payment.aggregate([
-      { $match: { studentId: intent.studentId, status: 'SUCCESS' } },
+      { $match: { studentId: student._id, status: 'SUCCESS' } },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
     const previousTotal = previousPayments.length ? previousPayments[0].total : 0;
@@ -152,7 +152,7 @@ async function syncPayments() {
     const feeValidation = validatePaymentAgainstFee(paymentAmount, intent.amount);
 
     await Payment.create({
-      studentId: intent.studentId,
+      studentId: student._id,
       transactionHash: tx.hash,
       amount: paymentAmount,
       feeAmount: intent.amount,
@@ -512,6 +512,7 @@ async function finalizeConfirmedPayments(schoolId) {
 
     await Payment.findByIdAndUpdate(payment._id, { confirmationStatus: 'confirmed' });
 
+    const student = await Student.findById(payment.studentId);
     const student = await Student.findOne({ schoolId, studentId: payment.studentId });
     if (!student) continue;
 
@@ -522,6 +523,8 @@ async function finalizeConfirmedPayments(schoolId) {
     const totalPaid = agg.length ? parseFloat(agg[0].total.toFixed(7)) : 0;
     const remainingBalance = parseFloat(Math.max(0, student.feeAmount - totalPaid).toFixed(7));
 
+    await Student.findByIdAndUpdate(
+      payment.studentId,
     await Student.findOneAndUpdate(
       { schoolId, studentId: payment.studentId },
       { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount }

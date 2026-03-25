@@ -24,8 +24,14 @@ jest.mock('../backend/src/models/studentModel', () => ({
 }));
 
 jest.mock('../backend/src/models/paymentModel', () => ({
-  find: jest.fn().mockReturnValue({ sort: jest.fn().mockResolvedValue([{ studentId: 'STU001', txHash: 'abc123', amount: 200 }]) }),
-  findOne: jest.fn().mockResolvedValue(null),
+  find: jest.fn().mockReturnValue({ 
+    sort: jest.fn().mockReturnValue({
+      populate: jest.fn().mockResolvedValue([{ studentId: { studentId: 'STU001', name: 'Alice' }, txHash: 'abc123', amount: 200 }])
+    })
+  }),
+  findOne: jest.fn().mockReturnValue({
+    sort: jest.fn().mockResolvedValue(null)
+  }),
   create: jest.fn().mockResolvedValue({}),
 }));
 

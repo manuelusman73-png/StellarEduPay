@@ -27,6 +27,7 @@ const paymentSchema = new mongoose.Schema({
 }, { timestamps: true });
 const paymentSchema = new mongoose.Schema(
   {
+    studentId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
     schoolId:             { type: String, required: true, index: true },
     studentId:            { type: String, required: true, index: true },
     txHash:               { type: String, required: true, unique: true, index: true },
@@ -58,6 +59,8 @@ const paymentSchema = new mongoose.Schema(
     toObject: { virtuals: true }
   }
 );
+
+paymentSchema.index({ studentId: 1, createdAt: -1 });
 
 paymentSchema.virtual('explorerUrl').get(function() {
   if (!this.transactionHash) return null;
