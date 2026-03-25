@@ -4,6 +4,7 @@ const { server, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/s
 const Payment = require('../models/paymentModel');
 const Student = require('../models/studentModel');
 const PaymentIntent = require('../models/paymentIntentModel');
+const { validatePaymentAmount } = require('../utils/paymentLimits');
 const { generateReferenceCode } = require('../utils/generateReferenceCode');
 
 /**
@@ -231,6 +232,8 @@ async function recordPayment(data) {
 }
 
 /**
+ * Verify a single transaction hash against the Stellar network and school wallet.
+ * Throws structured errors for all failure cases so the controller can handle them uniformly.
  * Verify a single transaction hash against a specific school wallet.
  *
  * @param {string} txHash        - 64-char hex transaction hash
@@ -240,6 +243,7 @@ async function recordPayment(data) {
 async function verifyTransaction(txHash, walletAddress) {
   const tx = await server.transactions().transaction(txHash).call();
 
+  // 1. Validate transaction success status
   // 1. Validate transaction success
   if (tx.successful === false) {
     const err = new Error('Transaction was not successful on the Stellar network');
@@ -276,6 +280,15 @@ async function verifyTransaction(txHash, walletAddress) {
 
   const amount = normalizeAmount(payOp.amount);
 
+  // 5. Validate payment amount is within configured limits
+  const limitValidation = validatePaymentAmount(amount);
+  if (!limitValidation.valid) {
+    const err = new Error(limitValidation.error);
+    err.code = limitValidation.code;
+    throw err;
+  }
+
+  // 6. Look up the student to validate fee amount
   // 5. Look up student to validate fee (student lookup is not school-scoped here
   //    since memo = studentId; recordPayment caller passes schoolId explicitly)
   const student = await Student.findOne({ studentId: memo });
@@ -300,6 +313,9 @@ async function verifyTransaction(txHash, walletAddress) {
 }
 
 /**
+ * Fetch recent transactions to the school wallet and record new payments.
+ */
+async function syncPayments() {
  * Fetch recent transactions for a specific school wallet and record new payments.
  * Replaces the old syncPayments() which used a global SCHOOL_WALLET constant.
  *
@@ -324,6 +340,7 @@ async function syncPaymentsForSchool(school) {
 
     const { payOp, memo } = valid;
 
+    const intent = await PaymentIntent.findOne({ memo, status: 'pending' });
     const intent = await PaymentIntent.findOne({ schoolId, memo, status: 'pending' });
     if (!intent) continue;
 
@@ -331,6 +348,14 @@ async function syncPaymentsForSchool(school) {
     if (!student) continue;
 
     const paymentAmount = parseFloat(payOp.amount);
+    
+    // Validate payment amount is within configured limits
+    const limitValidation = validatePaymentAmount(paymentAmount);
+    if (!limitValidation.valid) {
+      // Skip payments outside limits during sync
+      continue;
+    }
+
     const senderAddress = payOp.from || null;
     const txDate = new Date(tx.created_at);
     const txLedger = tx.ledger_attr || tx.ledger || null;
@@ -349,20 +374,26 @@ async function syncPaymentsForSchool(school) {
     const remaining = parseFloat((student.feeAmount - cumulativeTotal).toFixed(7));
 
     let cumulativeStatus;
-    if (cumulativeTotal < student.feeAmount) cumulativeStatus = 'underpaid';
-    else if (cumulativeTotal > student.feeAmount) cumulativeStatus = 'overpaid';
-    else cumulativeStatus = 'valid';
+    if (cumulativeTotal < student.feeAmount) {
+      cumulativeStatus = 'underpaid';
+    } else if (cumulativeTotal > student.feeAmount) {
+      cumulativeStatus = 'overpaid';
+    } else {
+      cumulativeStatus = 'valid';
+    }
 
     const excessAmount = cumulativeStatus === 'overpaid'
       ? parseFloat((cumulativeTotal - student.feeAmount).toFixed(7))
       : 0;
+
+    const feeValidation = validatePaymentAgainstFee(paymentAmount, intent.amount);
 
     await Payment.create({
       schoolId,
       studentId: intent.studentId,
       txHash: tx.hash,
       amount: paymentAmount,
-      feeAmount: student.feeAmount,
+      feeAmount: intent.amount,
       feeValidationStatus: cumulativeStatus,
       excessAmount,
       status: 'confirmed',
@@ -387,6 +418,10 @@ async function syncPaymentsForSchool(school) {
     }
 
     await PaymentIntent.findByIdAndUpdate(intent._id, { status: 'completed' });
+
+    if (feeValidation.status === 'valid' || feeValidation.status === 'overpaid') {
+      await Student.findOneAndUpdate({ studentId: intent.studentId }, { feePaid: true });
+    }
   }
 }
 

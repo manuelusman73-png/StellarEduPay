@@ -22,6 +22,12 @@ const {
   finalizeConfirmedPayments,
 } = require('../services/stellarService');
 const { queueForRetry } = require('../services/retryService');
+const { SCHOOL_WALLET, ACCEPTED_ASSETS } = require('../config/stellarConfig');
+const { getPaymentLimits } = require('../utils/paymentLimits');
+const crypto = require('crypto');
+
+// Permanent error codes that should NOT be retried
+const PERMANENT_FAIL_CODES = ['TX_FAILED', 'MISSING_MEMO', 'INVALID_DESTINATION', 'UNSUPPORTED_ASSET', 'AMOUNT_TOO_LOW', 'AMOUNT_TOO_HIGH'];
 const { ACCEPTED_ASSETS } = require('../config/stellarConfig');
 const {
   convertToLocalCurrency,
@@ -43,6 +49,7 @@ function wrapStellarError(err) {
 // GET /api/payments/instructions/:studentId
 async function getPaymentInstructions(req, res, next) {
   try {
+    const limits = getPaymentLimits();
     const targetCurrency = req.school.localCurrency || 'USD';
 
     // Optionally include the student's fee amount in local currency
@@ -60,6 +67,10 @@ async function getPaymentInstructions(req, res, next) {
         type: a.type,
         displayName: a.displayName,
       })),
+      paymentLimits: {
+        min: limits.min,
+        max: limits.max,
+      },
       feeAmount: student ? student.feeAmount : null,
       feeLocalEquivalent: feeConversion && feeConversion.available ? {
         amount:        feeConversion.localAmount,
@@ -83,6 +94,16 @@ async function createPaymentIntent(req, res, next) {
     const student = await Student.findOne({ schoolId, studentId });
     if (!student) return res.status(404).json({ error: 'Student not found', code: 'NOT_FOUND' });
 
+    // Validate that the student's fee amount is within payment limits
+    const { validatePaymentAmount } = require('../utils/paymentLimits');
+    const limitValidation = validatePaymentAmount(student.feeAmount);
+    if (!limitValidation.valid) {
+      return res.status(400).json({
+        error: limitValidation.error,
+        code: limitValidation.code,
+      });
+    }
+
     const memo = crypto.randomBytes(4).toString('hex').toUpperCase();
     const intent = await PaymentIntent.create({
       schoolId,
@@ -97,12 +118,36 @@ async function createPaymentIntent(req, res, next) {
   }
 }
 
+/**
+ * POST /api/payments/verify
+ *
+ * Accepts a Stellar transaction hash, queries the Stellar network to verify
+ * the payment, records it if valid, and returns the verification result.
+ *
+ * Request body: { txHash: string }  — 64-char hex string (validated by middleware)
+ *
+ * Success response (200):
+ *   {
+ *     verified: true,
+ *     hash, memo, studentId, amount, assetCode, assetType,
+ *     feeAmount, feeValidation: { status, excessAmount, message },
+ *     date, alreadyRecorded: boolean
+ *   }
+ *
+ * Error responses follow the global error handler format:
+ *   { error: string, code: string }
+ *   400 — TX_FAILED | MISSING_MEMO | INVALID_DESTINATION | UNSUPPORTED_ASSET | AMOUNT_TOO_LOW | AMOUNT_TOO_HIGH
+ *   409 — DUPLICATE_TX
+ *   404 — transaction not found / no valid payment
+ *   502 — STELLAR_NETWORK_ERROR
+ */
 // POST /api/payments/verify
 async function verifyPayment(req, res, next) {
   try {
     const { schoolId } = req;
     const { txHash } = req.body;
 
+    // Check if we've already recorded this transaction
     const existing = await Payment.findOne({ txHash });
     if (existing) {
       const err = new Error(`Transaction ${txHash} has already been processed`);
@@ -115,6 +160,9 @@ async function verifyPayment(req, res, next) {
       // Pass this school's wallet address so verifyTransaction checks the right destination
       result = await verifyTransaction(txHash, req.school.stellarAddress);
     } catch (stellarErr) {
+      // Record a failed payment entry for known failure codes so we have an audit trail
+      if (PERMANENT_FAIL_CODES.includes(stellarErr.code)) {
+        await Payment.create({
       if (PERMANENT_FAIL_CODES.includes(stellarErr.code)) {
         await Payment.create({
           schoolId,
@@ -122,6 +170,13 @@ async function verifyPayment(req, res, next) {
           txHash,
           amount: 0,
           status: 'failed',
+          feeValidationStatus: 'unknown',
+        }).catch(() => {}); // non-fatal — don't mask the original error
+        return next(stellarErr);
+      }
+
+      // Transient Stellar network error — cache for retry so the tx is not lost
+      await queueForRetry(txHash, req.body.studentId || null, stellarErr.message);
         }).catch(() => {});
         return next(stellarErr);
       }
@@ -133,13 +188,16 @@ async function verifyPayment(req, res, next) {
       });
     }
 
+    // verifyTransaction returns null if the tx exists but has no valid payment to the school wallet
     if (!result) {
       return res.status(404).json({
+        error: 'Transaction found but contains no valid payment to the school wallet',
         error: 'Transaction found but contains no valid payment to this school wallet',
         code: 'NOT_FOUND',
       });
     }
 
+    // Persist the verified payment
     const now = new Date();
     await recordPayment({
       schoolId,
@@ -192,6 +250,8 @@ async function syncAllPayments(req, res, next) {
     await syncPaymentsForSchool(req.school); // scoped to this school's wallet
     res.json({ message: 'Sync complete' });
   } catch (err) {
+    const wrapped = wrapStellarError(err);
+    next(wrapped);
     next(wrapStellarError(err));
   }
 }
@@ -233,6 +293,20 @@ async function getAcceptedAssets(req, res, next) {
         type: a.type,
         displayName: a.displayName,
       })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/payments/limits
+async function getPaymentLimitsEndpoint(req, res, next) {
+  try {
+    const limits = getPaymentLimits();
+    res.json({
+      min: limits.min,
+      max: limits.max,
+      message: `Payment amounts must be between ${limits.min} and ${limits.max}`,
     });
   } catch (err) {
     next(err);
@@ -384,6 +458,7 @@ module.exports = {
   finalizePayments,
   getStudentPayments,
   getAcceptedAssets,
+  getPaymentLimitsEndpoint,
   getOverpayments,
   getStudentBalance,
   getSuspiciousPayments,

@@ -43,6 +43,21 @@ const POLL_INTERVAL_MS       = parseInt(process.env.POLL_INTERVAL_MS || '30000',
 // ── Polling ───────────────────────────────────────────────────────────────────
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
 
+// ── Payment Limits ────────────────────────────────────────────────────────────
+// Minimum payment amount (default: 0.01 XLM/USDC)
+const MIN_PAYMENT_AMOUNT = parseFloat(process.env.MIN_PAYMENT_AMOUNT || '0.01');
+
+// Maximum payment amount (default: 100000 XLM/USDC)
+const MAX_PAYMENT_AMOUNT = parseFloat(process.env.MAX_PAYMENT_AMOUNT || '100000');
+
+// Validate payment limits
+if (MIN_PAYMENT_AMOUNT < 0) {
+  throw new Error('[Config] MIN_PAYMENT_AMOUNT must be a positive number');
+}
+
+if (MAX_PAYMENT_AMOUNT <= MIN_PAYMENT_AMOUNT) {
+  throw new Error('[Config] MAX_PAYMENT_AMOUNT must be greater than MIN_PAYMENT_AMOUNT');
+}
 // ── Timeouts ──────────────────────────────────────────────────────────────────
 // Maximum time (ms) an incoming HTTP request may remain open before the server
 // responds with 503. Covers slow Stellar/DB calls on any route.
@@ -62,6 +77,8 @@ const config = Object.freeze({
   USDC_ISSUER,
   CONFIRMATION_THRESHOLD,
   POLL_INTERVAL_MS,
+  MIN_PAYMENT_AMOUNT,
+  MAX_PAYMENT_AMOUNT,
   REQUEST_TIMEOUT_MS,
   STELLAR_TIMEOUT_MS,
 });

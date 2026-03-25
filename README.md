@@ -146,6 +146,8 @@ curl -X POST http://localhost:5000/api/students \
 | `STELLAR_NETWORK` | Yes | `testnet` or `mainnet` |
 | `SCHOOL_WALLET_ADDRESS` | Yes | School's Stellar public key |
 | `PORT` | No | Backend port (default: 5000) |
+| `MIN_PAYMENT_AMOUNT` | No | Minimum payment amount (default: 0.01) |
+| `MAX_PAYMENT_AMOUNT` | No | Maximum payment amount (default: 100000) |
 | `NEXT_PUBLIC_API_URL` | Yes (frontend) | Backend API base URL |
 
 ---
@@ -165,6 +167,7 @@ curl -X POST http://localhost:5000/api/students \
 | POST | `/api/payments/sync` | Sync latest payments from ledger |
 | GET | `/api/payments/:studentId` | Get payment history |
 | GET | `/api/payments/accepted-assets` | List accepted assets |
+| GET | `/api/payments/limits` | Get payment limits configuration |
 
 See [`docs/api-spec.md`](docs/api-spec.md) for full request/response examples.
 
@@ -202,6 +205,7 @@ All tests mock the Stellar SDK and MongoDB — no real network or database requi
 | [`docs/architecture.md`](docs/architecture.md) | System design, component overview, data flow |
 | [`docs/api-spec.md`](docs/api-spec.md) | Full API reference with request/response examples |
 | [`docs/stellar-integration.md`](docs/stellar-integration.md) | Memo field, accepted assets, fee validation, testnet setup |
+| [`docs/payment-limits.md`](docs/payment-limits.md) | Configurable payment limits for security |
 
 ---
 
