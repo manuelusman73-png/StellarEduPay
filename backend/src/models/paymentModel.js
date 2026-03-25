@@ -68,8 +68,8 @@ paymentSchema.index({ studentId: 1, createdAt: -1 });
 
 paymentSchema.virtual('explorerUrl').get(function() {
   if (!this.transactionHash) return null;
-  // Assumes testnet by default, could be dynamic based on config if needed
-  return `https://stellar.expert/explorer/testnet/tx/${this.transactionHash}`;
+  const network = process.env.STELLAR_NETWORK === 'mainnet' ? 'public' : 'testnet';
+  return `https://stellar.expert/explorer/${network}/tx/${this.transactionHash}`;
 });
 
 paymentSchema.pre('save', async function(next) {

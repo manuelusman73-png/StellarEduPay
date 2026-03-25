@@ -8,19 +8,13 @@ const Student = require('../models/studentModel');
  *
  * @param {{ schoolId: string, startDate?: string, endDate?: string }} options
  */
-async function aggregateByDate({ startDate, endDate } = {}) {
-  const match = { status: 'SUCCESS' };
 async function aggregateByDate({ schoolId, startDate, endDate } = {}) {
   const match = { schoolId, status: 'confirmed' };
 
   if (startDate || endDate) {
     match.confirmedAt = {};
-    if (startDate) match.confirmedAt.$gte = new Date(startDate);
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setUTCHours(23, 59, 59, 999);
-      match.confirmedAt.$lte = end;
-    }
+    if (startDate) match.confirmedAt.$gte = new Date(startDate + 'T00:00:00.000Z');
+    if (endDate)   match.confirmedAt.$lte = new Date(endDate   + 'T23:59:59.999Z');
   }
 
   const rows = await Payment.aggregate([
@@ -75,16 +69,11 @@ async function generateReport({ schoolId, startDate, endDate } = {}) {
   );
 
   // Count students who have fully paid within the period
-  const match = { status: 'SUCCESS' };
   const match = { schoolId, status: 'confirmed' };
   if (startDate || endDate) {
     match.confirmedAt = {};
-    if (startDate) match.confirmedAt.$gte = new Date(startDate);
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setUTCHours(23, 59, 59, 999);
-      match.confirmedAt.$lte = end;
-    }
+    if (startDate) match.confirmedAt.$gte = new Date(startDate + 'T00:00:00.000Z');
+    if (endDate)   match.confirmedAt.$lte = new Date(endDate   + 'T23:59:59.999Z');
   }
 
   const paidStudentIds = await Payment.distinct('studentId', match);

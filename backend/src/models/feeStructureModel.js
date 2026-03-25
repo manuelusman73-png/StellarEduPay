@@ -8,7 +8,7 @@ const feeStructureSchema = new mongoose.Schema(
     className:    { type: String, required: true },
     feeAmount:    { type: Number, required: true },
     description:  { type: String, default: '' },
-    academicYear: { type: String, default: () => new Date().getFullYear().toString() },
+    academicYear: { type: String, default: () => new Date().getUTCFullYear().toString() },
     isActive:     { type: Boolean, default: true, index: true },
   },
   { timestamps: true }
