@@ -21,12 +21,14 @@ const { startConsistencyScheduler } = require('./services/consistencyScheduler')
 const reportRoutes = require('./routes/reportRoutes');
 const { startPolling } = require('./services/transactionService');
 const { startRetryWorker } = require('./services/retryService');
+const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+// MongoDB connection and service startup
 // ── Request timeout ───────────────────────────────────────────────────────────
 // If a response has not been sent within REQUEST_TIMEOUT_MS, reply 503.
 app.use((req, res, next) => {
@@ -39,11 +41,26 @@ app.use((req, res, next) => {
 });
 
 mongoose.connect(config.MONGO_URI)
-  .then(() => {
+  .then(async () => {
     console.log('MongoDB connected');
+    
+    // Start existing services
     startPolling();
     startConsistencyScheduler();
     startRetryWorker();
+    
+    // Initialize BullMQ retry queue system
+    try {
+      await initializeRetryQueue(app);
+      
+      // Setup periodic monitoring (every 60 seconds)
+      setupMonitoring(60000);
+      
+      console.log('All services initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize retry queue system:', error);
+      // Don't crash the app if BullMQ fails - continue with existing retry service
+    }
   })
   .catch(err => console.error('MongoDB error:', err));
 
@@ -64,8 +81,26 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/fees', feeRoutes);
 app.get('/api/consistency', runConsistencyCheck);
 app.use('/api/reports', reportRoutes);
+// BullMQ retry queue routes are registered by initializeRetryQueue()
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/health', async (req, res) => {
+  try {
+    const { getSystemStatus } = require('./config/retryQueueSetup');
+    const retryQueueStatus = await getSystemStatus();
+    
+    res.json({ 
+      status: 'ok',
+      retryQueue: retryQueueStatus,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({ 
+      status: 'ok',
+      retryQueue: { error: error.message },
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // Global error handler
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
