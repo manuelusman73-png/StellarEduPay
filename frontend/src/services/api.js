@@ -27,3 +27,9 @@ export const getReportCsvUrl = (params = {}) => {
 
 // Currency conversion
 export const getConversionRates = () => api.get('/payments/rates');
+
+// Disputes
+export const flagDispute    = (data) => api.post('/disputes', data);
+export const getDisputes    = (params = {}) => api.get('/disputes', { params });
+export const getDisputeById = (id) => api.get(`/disputes/${id}`);
+export const resolveDispute = (id, data) => api.patch(`/disputes/${id}/resolve`, data);

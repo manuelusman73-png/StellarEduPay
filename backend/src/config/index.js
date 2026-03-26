@@ -65,6 +65,22 @@ const STELLAR_TIMEOUT_MS = parseInt(process.env.STELLAR_TIMEOUT_MS || '10000', 1
 const JWT_SECRET          = process.env.JWT_SECRET || null;
 const JWT_EXPIRES_IN      = process.env.JWT_EXPIRES_IN || '8h';
 
+// ── Fee Reminders ─────────────────────────────────────────────────────────────
+// How often the scheduler checks for unpaid fees (default: 24 hours)
+const REMINDER_INTERVAL_MS       = parseInt(process.env.REMINDER_INTERVAL_MS || String(24 * 60 * 60 * 1000), 10);
+// Minimum hours between reminders for the same student (default: 48 hours)
+const REMINDER_COOLDOWN_HOURS    = parseInt(process.env.REMINDER_COOLDOWN_HOURS || '48', 10);
+// Maximum reminders to send per student before stopping (default: 5)
+const REMINDER_MAX_COUNT         = parseInt(process.env.REMINDER_MAX_COUNT || '5', 10);
+
+// SMTP settings for nodemailer
+const SMTP_HOST     = process.env.SMTP_HOST || null;
+const SMTP_PORT     = parseInt(process.env.SMTP_PORT || '587', 10);
+const SMTP_SECURE   = process.env.SMTP_SECURE === 'true';
+const SMTP_USER     = process.env.SMTP_USER || null;
+const SMTP_PASS     = process.env.SMTP_PASS || null;
+const SMTP_FROM     = process.env.SMTP_FROM || 'noreply@stellaredupay.com';
+
 // ── Freeze to prevent accidental mutation at runtime ─────────────────────────
 const config = Object.freeze({
   PORT,
@@ -84,6 +100,15 @@ const config = Object.freeze({
   STELLAR_TIMEOUT_MS,
   JWT_SECRET,
   JWT_EXPIRES_IN,
+  REMINDER_INTERVAL_MS,
+  REMINDER_COOLDOWN_HOURS,
+  REMINDER_MAX_COUNT,
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_SECURE,
+  SMTP_USER,
+  SMTP_PASS,
+  SMTP_FROM,
 });
 
 module.exports = config;
