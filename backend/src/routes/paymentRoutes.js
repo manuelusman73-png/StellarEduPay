@@ -25,6 +25,7 @@ const {
   lockPaymentForUpdate,
   unlockPayment,
   generateReceipt,
+  getQueueJobStatus,
 } = require('../controllers/paymentController');
 
 const {
@@ -56,6 +57,7 @@ router.get('/dlq',                           getDeadLetterJobs);
 router.get('/balance/:studentId',            validateStudentIdParam, getStudentBalance);
 router.get('/instructions/:studentId',       validateStudentIdParam, getPaymentInstructions);
 router.get('/receipt/:txHash',               generateReceipt);
+router.get('/queue/:txHash',                 getQueueJobStatus);
 router.get('/:studentId',                    validateStudentIdParam, getStudentPayments);
 
 // ── POST routes ──────────────────────────────────────────────────────────────

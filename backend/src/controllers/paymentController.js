@@ -20,6 +20,7 @@ const {
   validatePaymentWithDynamicFee,     // ← New dynamic fee function
 } = require('../services/stellarService');
 const { queueForRetry } = require('../services/retryService');
+const { enqueueTransaction, getJobStatus } = require('../queue/transactionQueue');
 const { ACCEPTED_ASSETS, server } = require('../config/stellarConfig');
 const StellarSdk = require('@stellar/stellar-sdk');
 const { SCHOOL_WALLET, ACCEPTED_ASSETS, server } = require('../config/stellarConfig');
@@ -226,6 +227,8 @@ async function verifyPayment(req, res, next) {
     const { schoolId } = req;
     const { txHash } = req.body;
 
+    // Check if already recorded
+    const existing = await Payment.findOne({ txHash });
     // Validate transaction hash format
     const hashValidation = validateTransactionHash(txHash);
     if (!hashValidation.valid) {
@@ -245,6 +248,8 @@ async function verifyPayment(req, res, next) {
       return next(err);
     }
 
+    // Enqueue for async processing — returns immediately so spikes are absorbed
+    const job = await enqueueTransaction(txHash, {
     let result;
     try {
       result = await verifyTransaction(normalizedHash, req.school.stellarAddress);
@@ -313,22 +318,15 @@ async function verifyPayment(req, res, next) {
 
     await recordPayment({
       schoolId,
-      studentId: result.studentId || result.memo,
-      txHash: result.hash,
-      amount: result.amount,
-      feeAmount: result.feeAmount,
-      feeValidationStatus: result.feeValidation.status,
-      excessAmount: result.feeValidation.excessAmount,
-      networkFee: result.networkFee, // Store the extracted network fee
-      status: 'SUCCESS',
-      memo: result.memo,
-      senderAddress: result.senderAddress || null,
-      ledgerSequence: result.ledger || null,
-      confirmationStatus: 'confirmed',
-      confirmedAt: result.date ? new Date(result.date) : now,
-      verifiedAt: now,
+      school: req.school,
+      studentId: req.body.studentId || null,
     });
 
+    return res.status(202).json({
+      message: 'Transaction queued for processing',
+      txHash,
+      jobId: job.id,
+      statusUrl: `/api/payments/queue/${txHash}`,
     const targetCurrency = req.school.localCurrency || 'USD';
     const conversion = await convertToLocalCurrency(result.amount, result.assetCode || 'XLM', targetCurrency);
     const network = process.env.STELLAR_NETWORK === 'mainnet' ? 'public' : 'testnet';
@@ -358,18 +356,20 @@ async function verifyPayment(req, res, next) {
       },
     });
   } catch (err) {
-    // Retry queue logic for transient errors
-    if (PERMANENT_FAIL_CODES.includes(err.code)) {
-      // Ensure no 'orphan' payments can be created in the system
-      return next(err);
-    }
+    next(err);
+  }
+}
 
-    await queueForRetry(req.body.txHash, req.body.studentId || null, err.message);
-    return res.status(202).json({
-      message: 'Stellar network is temporarily unavailable. Your transaction has been queued.',
-      txHash: req.body.txHash,
-      status: 'queued_for_retry',
-    });
+async function getQueueJobStatus(req, res, next) {
+  try {
+    const { txHash } = req.params;
+    const status = await getJobStatus(txHash);
+    if (!status) {
+      return res.status(404).json({ error: 'No queued job found for this transaction hash', code: 'NOT_FOUND' });
+    }
+    res.json(status);
+  } catch (err) {
+    next(err);
   }
 }
 
@@ -802,4 +802,5 @@ module.exports = {
   lockPaymentForUpdate,
   unlockPayment,
   generateReceipt,
+  getQueueJobStatus,
 };

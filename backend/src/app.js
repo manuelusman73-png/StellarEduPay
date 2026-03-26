@@ -19,6 +19,7 @@ const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning } = require('./s
 const { startConsistencyScheduler } = require('./services/consistencyScheduler');
 const { startReminderScheduler, stopReminderScheduler } = require('./services/reminderService');
 const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
+const { startWorker: startTxQueueWorker, stopWorker: stopTxQueueWorker } = require('./services/transactionQueueService');
 const { initializeRetryQueue, setupMonitoring, getSystemStatus } = require('./config/retryQueueSetup');
 const database = require('./config/database');
 const { concurrentPaymentProcessor } = require('./services/concurrentPaymentProcessor');
@@ -97,6 +98,9 @@ async function initializeServices() {
   startPolling();
   startConsistencyScheduler();
   startRetryWorker();
+  startTxQueueWorker();
+
+  // Initialize BullMQ retry queue system
 
   try {
     await initializeRetryQueue(app);
@@ -259,6 +263,7 @@ async function shutdown(signal) {
 
   stopPolling();
   stopRetryWorker();
+  await stopTxQueueWorker();
   stopReminderScheduler();
 
   const deadline = Date.now() + 8_000;
