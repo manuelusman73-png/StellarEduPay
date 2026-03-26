@@ -13,11 +13,11 @@ const { requireAdminAuth } = require('../middleware/auth');
 
 // Public read endpoints
 router.get('/',                 getAllSchools);
-router.get('/:schoolSlug',      getSchool);
+router.get('/:schoolId',        getSchool);
 
 // Admin-only write endpoints — require JWT auth
 router.post('/',                requireAdminAuth, createSchool);
-router.patch('/:schoolSlug',    requireAdminAuth, updateSchool);
-router.delete('/:schoolSlug',   requireAdminAuth, deactivateSchool);
+router.patch('/:schoolId',      requireAdminAuth, updateSchool);
+router.delete('/:schoolId',     requireAdminAuth, deactivateSchool);
 
 module.exports = router;

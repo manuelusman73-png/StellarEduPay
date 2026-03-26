@@ -2,9 +2,8 @@
 
 const express = require('express');
 const router = express.Router();
-const { registerStudent, getAllStudents, getStudent, getPaymentSummary } = require('../controllers/studentController');
+const { registerStudent, getAllStudents, getStudent, getPaymentSummary, bulkImportStudents } = require('../controllers/studentController');
 const multer = require('multer');
-const { registerStudent, getAllStudents, getStudent, bulkImportStudents } = require('../controllers/studentController');
 const { validateRegisterStudent, validateStudentIdParam } = require('../middleware/validate');
 const { resolveSchool } = require('../middleware/schoolContext');
 
