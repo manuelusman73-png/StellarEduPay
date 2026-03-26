@@ -1,25 +1,5 @@
 'use strict';
 
-/**
- * Validation Middleware — validate.js
- * ------------------------------------
- * Central module for all Express request validation.
- *
- * Architecture:
- *   - `validate(schema, source)` is a generic Joi-based factory that returns
- *     an Express middleware.  Any Joi schema can be plugged in.
- *   - Payment-specific schemas live in `./schemas/paymentSchemas.js`.
- *   - Manual validators (students, fees, params) are kept as-is for
- *     backward compatibility with their existing routes.
- *
- * Error format on validation failure (HTTP 400):
- *   {
- *     "errors": [
- *       { "field": "studentId", "message": "\"studentId\" must be a valid MongoDB ObjectId (24-char hex)" }
- *     ]
- *   }
- */
-
 const Joi = require('joi');
 
 const {
@@ -28,20 +8,11 @@ const {
   verifyPaymentSchema,
 } = require('./schemas/paymentSchemas');
 
-// ── Generic Joi factory ───────────────────────────────────────────────────────
-
-/**
- * Returns an Express middleware that validates `req[source]` against `schema`.
- *
- * @param {Joi.ObjectSchema} schema  - Joi schema to validate against.
- * @param {'body'|'query'|'params'} [source='body'] - Which request property to validate.
- * @returns {Function} Express middleware function.
- */
 function validate(schema, source = 'body') {
   return (req, res, next) => {
     const { error, value } = schema.validate(req[source], {
-      abortEarly: false,  // collect ALL errors, not just the first
-      convert:    true,   // allow Joi to coerce types (e.g. string '24' -> number 24)
+      abortEarly: false,
+      convert:    true,
     });
 
     if (error) {
@@ -52,26 +23,15 @@ function validate(schema, source = 'body') {
       return res.status(400).json({ errors });
     }
 
-    // Replace req[source] with the Joi-sanitised value (trimmed strings, coerced types, etc.)
     req[source] = value;
     return next();
   };
 }
 
-// ── Payment validators (Joi-based) ────────────────────────────────────────────
-
-/** POST /api/payments/intent */
 const validateCreatePaymentIntent = validate(createPaymentIntentSchema, 'body');
-
-/** POST /api/payments/submit */
 const validateSubmitTransaction = validate(submitTransactionSchema, 'body');
-
-/** POST /api/payments/verify */
 const validateVerifyPayment = validate(verifyPaymentSchema, 'body');
 
-// ── Student validators (manual — kept for backward compatibility) ─────────────
-
-// Alphanumeric student IDs used in URL params, 3–20 chars
 const STUDENT_ID_RE = /^[A-Za-z0-9_-]{3,20}$/;
 
 function validStudentId(id) {
@@ -83,6 +43,10 @@ function validPositiveNumber(val) {
   return Number.isFinite(n) && n > 0;
 }
 
+function validTxHash(hash) {
+  return typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash);
+}
+
 /** Middleware: validate :studentId URL param */
 function validateStudentIdParam(req, res, next) {
   if (!validStudentId(req.params.studentId)) {
@@ -91,17 +55,29 @@ function validateStudentIdParam(req, res, next) {
   return next();
 }
 
+/** Middleware: validate :txHash URL param */
+function validateTxHashParam(req, res, next) {
+  if (!validTxHash(req.params.txHash)) {
+    return res.status(400).json({ errors: [{ field: 'txHash', message: 'Invalid txHash format' }] });
+  }
+  return next();
+}
+
 /** Middleware: validate POST /api/students body */
 function validateRegisterStudent(req, res, next) {
-  const { studentId, name, class: className } = req.body;
+  const { studentId, name, class: className, feeAmount } = req.body;
   const errors = [];
 
-  if (!validStudentId(studentId))                            errors.push('studentId must be 3–20 alphanumeric characters');
-  if (!name || typeof name !== 'string' || !name.trim())    errors.push('name is required');
-  if (studentId != null && !validStudentId(studentId)) errors.push('studentId must be 3–20 alphanumeric characters');
-  if (!name || typeof name !== 'string' || !name.trim()) errors.push('name is required');
-  if (!className || typeof className !== 'string' || !className.trim()) errors.push('class is required');
-  if (req.body.feeAmount != null && !validPositiveNumber(req.body.feeAmount)) {
+  if (studentId != null && !validStudentId(studentId)) {
+    errors.push('studentId must be 3–20 alphanumeric characters');
+  }
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    errors.push('name is required');
+  }
+  if (!className || typeof className !== 'string' || !className.trim()) {
+    errors.push('class is required');
+  }
+  if (feeAmount != null && !validPositiveNumber(feeAmount)) {
     errors.push('feeAmount must be a positive number');
   }
 
@@ -109,7 +85,6 @@ function validateRegisterStudent(req, res, next) {
   return next();
 }
 
-/** Middleware: validate POST /api/fees body */
 function validateFeeStructure(req, res, next) {
   const { className, feeAmount } = req.body;
   const errors = [];
@@ -121,19 +96,13 @@ function validateFeeStructure(req, res, next) {
   return next();
 }
 
-// ── Exports ───────────────────────────────────────────────────────────────────
-
 module.exports = {
-  // Factory (for future custom validators)
   validate,
-
-  // Payment validators (Joi)
   validateCreatePaymentIntent,
   validateSubmitTransaction,
   validateVerifyPayment,
-
-  // Student / fee validators (manual, backward-compatible)
   validateStudentIdParam,
+  validateTxHashParam,
   validateRegisterStudent,
   validateFeeStructure,
 };

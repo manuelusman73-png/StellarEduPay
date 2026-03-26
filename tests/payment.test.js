@@ -30,15 +30,18 @@ jest.mock('../backend/src/models/studentModel', () => ({
 }));
 
 jest.mock('../backend/src/models/paymentModel', () => ({
-  find: jest.fn().mockReturnValue({ 
+  find: jest.fn().mockReturnValue({
     sort: jest.fn().mockReturnValue({
-      populate: jest.fn().mockResolvedValue([{ studentId: { studentId: 'STU001', name: 'Alice' }, txHash: 'abc123', amount: 200 }])
-    })
+      lean: jest.fn().mockResolvedValue([{ studentId: 'STU001', txHash: 'abc123', amount: 200 }]),
+      populate: jest.fn().mockResolvedValue([{ studentId: { studentId: 'STU001', name: 'Alice' }, txHash: 'abc123', amount: 200 }]),
+    }),
   }),
   findOne: jest.fn().mockReturnValue({
-    sort: jest.fn().mockResolvedValue(null)
+    sort: jest.fn().mockResolvedValue(null),
   }),
   create: jest.fn().mockResolvedValue({}),
+  aggregate: jest.fn().mockResolvedValue([]),
+  countDocuments: jest.fn().mockResolvedValue(0),
 }));
 
 jest.mock('../backend/src/models/paymentIntentModel', () => ({
@@ -71,6 +74,12 @@ jest.mock('../backend/src/services/transactionService', () => ({
 
 jest.mock('../backend/src/services/consistencyScheduler', () => ({
   startConsistencyScheduler: jest.fn(),
+}));
+
+jest.mock('../backend/src/services/reminderService', () => ({
+  startReminderScheduler: jest.fn(),
+  stopReminderScheduler: jest.fn(),
+  processReminders: jest.fn().mockResolvedValue({ schools: 0, eligible: 0, sent: 0, failed: 0, skipped: 0 }),
 }));
 
 jest.mock('../backend/src/models/schoolModel', () => ({
@@ -120,16 +129,47 @@ jest.mock('../backend/src/services/currencyConversionService', () => ({
   _getRates: jest.fn().mockResolvedValue(null),
 }));
 
+jest.mock('../backend/src/config/stellarConfig', () => ({
+  SCHOOL_WALLET: 'GTEST123',
+  ACCEPTED_ASSETS: {
+    XLM:  { code: 'XLM',  type: 'native',          issuer: null },
+    USDC: { code: 'USDC', type: 'credit_alphanum4', issuer: 'GISSUER' },
+  },
+  server: {
+    transactions: () => ({
+      transaction: (txHash) => ({
+        call: async () => ({
+          hash: txHash,
+          successful: true,
+          created_at: new Date().toISOString(),
+          ledger_attr: 12345,
+          memo: 'test-memo',
+          fee_paid: 100,
+          source_account: 'GACCOUNT',
+          operation_count: 1,
+        }),
+      }),
+    }),
+  },
+}));
+
 jest.mock('../backend/src/services/stellarService', () => ({
   syncPayments: jest.fn().mockResolvedValue(undefined),
   syncPaymentsForSchool: jest.fn().mockResolvedValue(undefined),
   verifyTransaction: jest.fn().mockResolvedValue({
     hash: 'abc123',
-    memo: 'ABCD1234',
+    memo: 'STU001',
+    studentId: 'STU001',
     amount: 200,
+    assetCode: 'XLM',
+    assetType: 'native',
     expectedAmount: 200,
-    feeValidation: { status: 'valid', message: 'Payment matches the required fee' },
+    feeAmount: 200,
+    feeValidation: { status: 'valid', excessAmount: 0, message: 'Payment matches the required fee' },
+    networkFee: 0.00001,
     date: new Date().toISOString(),
+    ledger: 100,
+    senderAddress: 'GSENDER123',
   }),
   recordPayment: jest.fn().mockResolvedValue({}),
   finalizeConfirmedPayments: jest.fn().mockResolvedValue(undefined),
@@ -286,10 +326,7 @@ describe('Fee Structure API', () => {
 
 describe('Payment Intent API', () => {
   test('POST /api/payments/intent — creates a payment intent', async () => {
-    // studentId must be a valid 24-char hex MongoDB ObjectId (enforced by Joi middleware)
-    const res = await request(app).post('/api/payments/intent').send({ studentId: MOCK_STUDENT_OBJ_ID });
-    const res = await request(app)
-      .post('/api/payments/intent')
+    const res = await testApi.post('/api/payments/intent')
       .set('Idempotency-Key', 'test-intent-stu001')
       .send({ studentId: 'STU001' });
     expect(res.status).toBe(201);
@@ -323,6 +360,8 @@ describe('Payment Intent API', () => {
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('errors');
     expect(res.body.errors[0]).toHaveProperty('field', 'xdr');
+  });
+
   test('POST /api/v1/payments/intent — 404 for unknown student', async () => {
     const Student = require('../backend/src/models/studentModel');
     Student.findOne.mockResolvedValueOnce(null);
@@ -475,5 +514,27 @@ describe('Idempotency', () => {
   test('POST /api/payments/sync — does NOT require Idempotency-Key', async () => {
     const res = await testApi.post('/api/payments/sync');
     expect(res.status).toBe(200);
+  });
+
+  test('GET /api/payments/verify/:txHash — returns transaction details', async () => {
+    const txHash = 'a'.repeat(64);
+    const res = await request(app).get(`/api/payments/verify/${txHash}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hash: txHash,
+      successful: true,
+      created_at: expect.any(String),
+      ledger: 12345,
+      memo: 'test-memo',
+      fee_paid: 100,
+      source_account: 'GACCOUNT',
+      operations_count: 1,
+    });
+  });
+
+  test('GET /api/payments/verify/:txHash — 400 for invalid txHash', async () => {
+    const res = await request(app).get('/api/payments/verify/invalid');
+    expect(res.status).toBe(400);
+    expect(res.body.errors[0].field).toBe('txHash');
   });
 });

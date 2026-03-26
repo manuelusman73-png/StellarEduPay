@@ -7,6 +7,7 @@ process.env.SCHOOL_WALLET_ADDRESS = 'GTEST123';
 const {
   verifyTransaction,
   syncPaymentsForSchool,
+  parseIncomingTransaction,
   validatePaymentAgainstFee,
   detectAsset,
   normalizeAmount,
@@ -219,6 +220,7 @@ describe('verifyTransaction', () => {
     });
     await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'UNSUPPORTED_ASSET' });
   });
+});
 
   test('feeValidation status is unknown when student not found', async () => {
     Student.findOne.mockResolvedValue(null);
@@ -227,6 +229,32 @@ describe('verifyTransaction', () => {
     });
     const result = await verifyTransaction('abc123', 'GTEST123');
     expect(result.feeValidation.status).toBe('unknown');
+  });
+});
+
+// ─── parseIncomingTransaction ─────────────────────────────────────────────────
+
+describe('parseIncomingTransaction', () => {
+  test('correctly extracts memo and amount from payment op', async () => {
+    const txHash = 'abc123';
+
+    mockOperations.mockResolvedValue({
+      records: [
+        { type: 'payment', from: 'GFROM', to: 'GTEST123', amount: '150.0', asset_type: 'native' },
+        { type: 'payment', from: 'GFROM', to: 'GOTHER', amount: '50.0', asset_type: 'native' },
+      ],
+    });
+
+    const parsed = await parseIncomingTransaction(txHash, 'GTEST123');
+    expect(parsed.memo).toBe('STU001');
+    expect(parsed.payments).toHaveLength(1);
+    expect(parsed.payments[0]).toMatchObject({
+      from: 'GFROM',
+      to: 'GTEST123',
+      amount: 150.0,
+      assetCode: 'XLM',
+      assetType: 'native',
+    });
   });
 });
 

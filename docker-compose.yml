@@ -4,11 +4,12 @@ services:
   backend:
     build: ./backend
     ports:
-      - "5000:5000"
+      - "${PORT:-5000}:5000"
     environment:
       - MONGO_URI=mongodb://mongo:27017/stellaredupay
-      - STELLAR_NETWORK=testnet
+      - STELLAR_NETWORK=${STELLAR_NETWORK}
       - SCHOOL_WALLET_ADDRESS=${SCHOOL_WALLET_ADDRESS}
+      - STELLAR_SECRET_KEY=${STELLAR_SECRET_KEY}
     depends_on:
       - mongo
 

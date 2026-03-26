@@ -950,5 +950,22 @@ If you encounter any issues or have questions:
 - **MongoDB Atlas**: https://www.mongodb.com/atlas
 
 ---
+## 🛠 Troubleshooting & Pitfalls
+
+If you encounter issues during setup, check the table below for common Stellar-specific errors and their solutions.
+
+| Error | Likely Cause | Solution |
+| :--- | :--- | :--- |
+| `tx_insufficient_balance` | The Stellar account in your `.env` has 0 XLM. | Go to the [Stellar Laboratory](https://laboratory.stellar.org/#account-creator?network=testnet) and use **Friendbot** to fund your Secret Key. |
+| `op_no_trust` | The recipient hasn't established a trustline for your custom asset. | Ensure the `ChangeTrust` operation is submitted by the student/user account before attempting to send tokens. |
+| `connection refused` | The MongoDB container is down or the URI is incorrect. | Run `docker ps` to ensure the `mongo` container is healthy. If running the backend natively, ensure `MONGO_URI` points to `localhost:27017`. |
+| `tx_bad_auth` | The `STELLAR_SECRET_KEY` does not match the public address being used. | Double-check your `.env` file to ensure the Secret Key corresponds to the correct Public Key. |
+
+### 🔍 Viewing Logs
+If the containers are running but the API isn't responding, check the real-time logs:
+```bash
+docker-compose logs -f backend
+
+---
 
 **Built with ❤️ using Stellar blockchain technology**
