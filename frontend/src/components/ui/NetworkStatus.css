@@ -1,0 +1,313 @@
+/* NetworkStatus Component Styles */
+
+.network-status {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.network-status:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.status-summary {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.status-summary:hover {
+  background-color: #f9fafb;
+}
+
+.status-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.status-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.status-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  display: block;
+  line-height: 1.2;
+}
+
+.backup-indicator {
+  font-size: 12px;
+  color: #f59e0b;
+  font-weight: normal;
+}
+
+.health-score {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.expand-arrow {
+  color: #9ca3af;
+  font-size: 12px;
+  margin-left: 8px;
+  transition: transform 0.2s ease;
+}
+
+.network-status.expanded .expand-arrow {
+  transform: rotate(90deg);
+}
+
+/* Status Details */
+.status-details {
+  border-top: 1px solid #e5e7eb;
+  padding: 12px;
+  background-color: #f9fafb;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.detail-item label {
+  color: #6b7280;
+  font-weight: 500;
+  margin-right: 8px;
+}
+
+.detail-item span {
+  color: #374151;
+  font-weight: 400;
+  text-align: right;
+}
+
+/* Status Badges */
+.status-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.healthy {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.failed {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.unknown {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+/* Server URL */
+.server-url {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px !important;
+  word-break: break-all;
+}
+
+.backup-tag {
+  background-color: #f59e0b;
+  color: white;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  margin-left: 4px;
+  font-weight: bold;
+}
+
+/* Congestion Level */
+.congestion-level {
+  font-weight: 600;
+}
+
+/* Failure Rate */
+.failure-rate {
+  color: #ef4444 !important;
+  font-weight: 600;
+}
+
+/* Recent Errors */
+.recent-errors {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.recent-errors h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: #374151;
+  font-weight: 600;
+}
+
+.recent-errors ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.recent-errors li {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.error-time {
+  color: #6b7280;
+  margin-right: 8px;
+  flex-shrink: 0;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.error-message {
+  color: #ef4444;
+  flex: 1;
+}
+
+/* Status Actions */
+.status-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.refresh-btn {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.refresh-btn:hover {
+  background-color: #2563eb;
+}
+
+.last-updated {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* Loading State */
+.network-status.loading .status-indicator {
+  background-color: #6b7280;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background-color: white;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+/* Error State */
+.network-status.error .status-indicator {
+  background-color: #ef4444;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .detail-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  
+  .detail-item span {
+    text-align: left;
+  }
+  
+  .server-url {
+    word-break: break-all;
+  }
+}
+
+/* Compact Mode */
+.network-status.compact {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.network-status.compact .status-summary {
+  padding: 4px 8px;
+}
+
+.network-status.compact .status-text {
+  font-size: 13px;
+}
+
+.network-status.compact .health-score {
+  display: none;
+}

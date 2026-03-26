@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import TestnetBanner from './TestnetBanner';
+import NetworkStatus from './ui/NetworkStatus';
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -58,6 +59,9 @@ export default function Navbar() {
             </Link>
           ))}
         </div>
+
+        {/* Network status indicator */}
+        <NetworkStatus className="compact" />
 
         {/* Hamburger (hidden on desktop via media query) */}
         <button

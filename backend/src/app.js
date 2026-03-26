@@ -15,7 +15,9 @@ const schoolRoutes = require('./routes/schoolRoutes');
 const reminderRoutes = require('./routes/reminderRoutes');
 const disputeRoutes = require('./routes/disputeRoutes');
 
+const networkRoutes  = require('./routes/networkRoutes');
 const { startPolling, stopPolling } = require('./services/transactionService');
+const { networkMonitor } = require('./services/network-monitor.service');
 const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning } = require('./services/retryService');
 const { startConsistencyScheduler } = require('./services/consistencyScheduler');
 const { startReminderScheduler, stopReminderScheduler } = require('./services/reminderService');
@@ -75,6 +77,7 @@ app.use('/api/fees', feeRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/reminders', reminderRoutes);
 app.use('/api/disputes', disputeRoutes);
+app.use('/api/v1/network', networkRoutes);
 app.get('/api/consistency', runConsistencyCheck);
 app.get('/health', healthCheck);
 
@@ -128,8 +131,8 @@ connectWithRetry().then(async () => {
     logger.info('All services initialized successfully');
   } catch (error) {
     logger.error('Failed to initialize retry queue system', { error: error.message });
+    // Don't crash the app if BullMQ fails - continue with existing retry service
   }
-});
 
 // ── Server ────────────────────────────────────────────────────────────────────
 const PORT = config.PORT;

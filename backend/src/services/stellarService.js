@@ -1,17 +1,13 @@
 "use strict";
 
-const {
-  server,
-  isAcceptedAsset,
-  CONFIRMATION_THRESHOLD,
-} = require("../config/stellarConfig");
-const Payment = require("../models/paymentModel");
-const Student = require("../models/studentModel");
-const PaymentIntent = require("../models/paymentIntentModel");
-const { validatePaymentAmount } = require("../utils/paymentLimits");
-const { withStellarRetry } = require("../utils/withStellarRetry");
-const { savePayment } = require("./transactionService");
-const logger = require("../utils/logger").child("StellarService");
+const { getCurrentServer, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/stellarConfig');
+const { networkMonitor } = require('./network-monitor.service');
+const Payment = require('../models/paymentModel');
+const Student = require('../models/studentModel');
+const PaymentIntent = require('../models/paymentIntentModel');
+const { validatePaymentAmount } = require('../utils/paymentLimits');
+const { generateReferenceCode } = require('../utils/generateReferenceCode');
+const logger = require('../utils/logger').child('StellarService');
 
 function detectAsset(payOp) {
   const assetType = payOp.asset_type;
@@ -79,12 +75,16 @@ function validatePaymentAgainstFee(paymentAmount, expectedFee) {
 }
 
 async function checkConfirmationStatus(txLedger) {
-  const latestLedger = await withStellarRetry(
-    () => server.ledgers().order("desc").limit(1).call(),
-    { label: "checkConfirmationStatus" },
-  );
-  const latestSequence = latestLedger.records[0].sequence;
-  return latestSequence - txLedger >= CONFIRMATION_THRESHOLD;
+  try {
+    const currentServer = getCurrentServer();
+    const latestLedger = await currentServer.ledgers().order('desc').limit(1).call();
+    const latestSequence = latestLedger.records[0].sequence;
+    return (latestSequence - txLedger) >= CONFIRMATION_THRESHOLD;
+  } catch (error) {
+    logger.error('Failed to check confirmation status', { error: error.message });
+    networkMonitor.recordTransactionResult(false);
+    throw error;
+  }
 }
 
 /**
@@ -180,6 +180,35 @@ async function detectAbnormalPatterns(
 }
 
 /**
+ * Persist a payment record, enforcing uniqueness on txHash.
+ * Throws DUPLICATE_TX if already recorded.
+ * data must include schoolId.
+ */
+async function recordPayment(data) {
+  const exists = await Payment.findOne({ transactionHash: data.transactionHash });
+  if (exists) {
+    const err = new Error(`Transaction ${data.transactionHash} has already been processed`);
+    err.code = 'DUPLICATE_TX';
+    throw err;
+  }
+  if (!data.referenceCode) {
+    data = { ...data, referenceCode: await generateReferenceCode() };
+  }
+  try {
+    return await Payment.create(data);
+  } catch (e) {
+    if (e.code === 11000) {
+      const err = new Error(`Transaction ${data.transactionHash} has already been processed`);
+      err.code = 'DUPLICATE_TX';
+      logger.warn('Duplicate transaction rejected', { txHash: data.transactionHash, schoolId: data.schoolId });
+      throw err;
+    }
+    logger.error('Failed to record payment', { error: e.message, txHash: data.transactionHash, schoolId: data.schoolId });
+    throw e;
+  }
+}
+
+/**
  * Verify a single transaction hash against a specific school wallet.
  * Throws structured errors for all failure cases.
  *
@@ -193,10 +222,8 @@ async function detectAbnormalPatterns(
  *   AMOUNT_TOO_LOW/HIGH (400) — outside configured limits
  */
 async function verifyTransaction(txHash, walletAddress) {
-  const tx = await withStellarRetry(
-    () => server.transactions().transaction(txHash).call(),
-    { label: "verifyTransaction" },
-  );
+  const currentServer = getCurrentServer();
+  const tx = await currentServer.transactions().transaction(txHash).call();
 
   // 1. Validate transaction success
   if (tx.successful === false) {
@@ -292,17 +319,14 @@ async function verifyTransaction(txHash, walletAddress) {
  */
 async function syncPaymentsForSchool(school) {
   const { schoolId, stellarAddress } = school;
+  const currentServer = getCurrentServer();
 
-  let page = await withStellarRetry(
-    () =>
-      server
-        .transactions()
-        .forAccount(stellarAddress)
-        .order("desc")
-        .limit(200)
-        .call(),
-    { label: `syncPaymentsForSchool(${schoolId})` },
-  );
+  let page = await currentServer
+    .transactions()
+    .forAccount(stellarAddress)
+    .order('desc')
+    .limit(200)
+    .call();
 
   let done = false;
   let newPayments = 0;

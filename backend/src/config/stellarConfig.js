@@ -7,6 +7,17 @@ const server = new StellarSdk.Horizon.Server(config.HORIZON_URL, {
   timeout: config.STELLAR_TIMEOUT_MS,
 });
 
+// Function to get current server (will be updated by network monitor)
+let currentServerInstance = server;
+
+function getCurrentServer() {
+  return currentServerInstance;
+}
+
+function setCurrentServer(newServer) {
+  currentServerInstance = newServer;
+}
+
 const networkPassphrase = config.IS_TESTNET
   ? StellarSdk.Networks.TESTNET
   : StellarSdk.Networks.PUBLIC;
@@ -77,6 +88,8 @@ const CONFIRMATION_THRESHOLD = config.CONFIRMATION_THRESHOLD;
 
 module.exports = {
   server,
+  getCurrentServer,
+  setCurrentServer,
   networkPassphrase,
   SCHOOL_WALLET,
   StellarSdk,
