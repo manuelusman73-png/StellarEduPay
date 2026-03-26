@@ -34,7 +34,7 @@ const paymentSchema = new mongoose.Schema(
     ledgerSequence: { type: Number, default: null },
     confirmationStatus: {
       type: String,
-      enum: ["pending_confirmation", "confirmed"],
+      enum: ["pending_confirmation", "confirmed", "failed"],
       default: "pending_confirmation",
     },
 

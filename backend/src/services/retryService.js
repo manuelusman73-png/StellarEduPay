@@ -10,6 +10,7 @@
  */
 
 const PendingVerification = require("../models/pendingVerificationModel");
+const Payment = require("../models/paymentModel");
 const School = require("../models/schoolModel");
 const { verifyTransaction, recordPayment } = require("./stellarService");
 const { server } = require("../config/stellarConfig");
@@ -178,6 +179,29 @@ async function processPendingVerifications() {
             status: "dead_letter",
             lastError: err.message,
           });
+
+          // Create a FAILED Payment audit record for on-chain failures
+          if (err.code === "TX_FAILED") {
+            await Payment.create({
+              schoolId: item.schoolId,
+              studentId: item.studentId || "unknown",
+              txHash: item.txHash,
+              transactionHash: item.txHash,
+              amount: 0,
+              status: "FAILED",
+              feeValidationStatus: "unknown",
+              confirmationStatus: "failed",
+              confirmedAt: new Date(),
+              suspicionReason: err.message,
+            }).catch((e) => {
+              if (e.code !== 11000)
+                logger.error("Failed to record failed tx audit", {
+                  txHash: item.txHash,
+                  error: e.message,
+                });
+            });
+          }
+
           logger.error("Dead-lettered transaction", {
             txHash: item.txHash,
             reason: isPermanentError
