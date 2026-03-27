@@ -6,27 +6,11 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 
-const schoolRoutes   = require('./routes/schoolRoutes');
-const studentRoutes  = require('./routes/studentRoutes');
-const paymentRoutes  = require('./routes/paymentRoutes');
-const feeRoutes      = require('./routes/feeRoutes');
-const reportRoutes   = require('./routes/reportRoutes');
-const reminderRoutes = require('./routes/reminderRoutes');
-const disputeRoutes  = require('./routes/disputeRoutes');
-const { runConsistencyCheck } = require('./controllers/consistencyController');
-const { startPolling, stopPolling } = require('./services/transactionPollingService');
-const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning } = require('./services/retryService');
-const { startConsistencyScheduler } = require('./services/consistencyScheduler');
-const { startReminderScheduler, stopReminderScheduler } = require('./services/reminderService');
-const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
-const { startWorker: startTxQueueWorker, stopWorker: stopTxQueueWorker } = require('./services/transactionQueueService');
-const { initializeRetryQueue, setupMonitoring, getSystemStatus } = require('./config/retryQueueSetup');
-const database = require('./config/database');
-const { concurrentPaymentProcessor } = require('./services/concurrentPaymentProcessor');
-const { createConcurrentRequestMiddleware } = require('./middleware/concurrentRequestHandler');
-const { requestLogger } = require('./middleware/requestLogger');
-const { globalErrorHandler, notFoundHandler } = require('./middleware/errorHandler');
-const logger = require('./utils/logger');
+const studentRoutes = require('./routes/studentRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const feeRoutes = require('./routes/feeRoutes');
+const { startPolling } = require('./services/transactionService');
+const { runMigrations } = require('./services/migrationRunner');
 
 const app = express();
 
@@ -132,23 +116,10 @@ async function startApp() {
 // Start the application
 startApp();
 
-// ── Request timeout ───────────────────────────────────────────────────────────
-app.use((req, res, next) => {
-  res.setTimeout(config.REQUEST_TIMEOUT_MS, () => {
-    const err = new Error(`Request timed out after ${config.REQUEST_TIMEOUT_MS}ms`);
-    err.code = 'REQUEST_TIMEOUT';
-    next(err);
-  });
-  next();
-});
-
-// ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api/schools',   schoolRoutes);
-mongoose.connect(config.MONGO_URI)
-  .then(async () => {
-    logger.info('MongoDB connected');
-
-    // Start existing services
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/stellaredupay')
+  .then(() => {
+    console.log('MongoDB connected');
+    await runMigrations();
     startPolling();
     startConsistencyScheduler();
     startRetryWorker();
