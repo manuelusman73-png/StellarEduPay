@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1' });
 const TIMEOUT_MS = parseInt(process.env.NEXT_PUBLIC_REQUEST_TIMEOUT_MS || '15000', 10);
 
 const api = axios.create({
