@@ -1,7 +1,8 @@
 'use strict';
 
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
+
 const {
   getPaymentInstructions,
   createPaymentIntent,
@@ -36,15 +37,15 @@ const {
   validateCreatePaymentIntent,
   validateVerifyPayment,
 } = require('../middleware/validate');
-const { resolveSchool } = require('../middleware/schoolContext');
-const idempotency = require('../middleware/idempotency');
+const { resolveSchool }   = require('../middleware/schoolContext');
+const idempotency         = require('../middleware/idempotency');
 const { requireAdminAuth } = require('../middleware/auth');
-const { strictLimiter, generalLimiter } = require('../middleware/rateLimiter');
+const { strictLimiter }   = require('../middleware/rateLimiter');
 
-// Verify transaction hash (does not require school context)
+// Does not require school context
 router.get('/verify/:txHash', validateTxHashParam, verifyTransactionHash);
 
-// All payment routes require school context
+// All routes below require school context
 router.use(resolveSchool);
 
 // ── Static routes (before parameterized ones) ────────────────────────────────
@@ -73,25 +74,23 @@ router.post('/verify',                       strictLimiter, idempotency, validat
 router.post('/sync',                         strictLimiter, requireAdminAuth, syncAllPayments);
 router.post('/finalize',                     requireAdminAuth, finalizePayments);
 
-// ── Parameterized routes (must come last) ────────────────────────────────────
-router.get('/dlq',                           getDeadLetterJobs);
-router.get('/balance/:studentId',            validateStudentIdParam, getStudentBalance);
-router.get('/instructions/:studentId',       validateStudentIdParam, getPaymentInstructions);
-router.get('/receipt/:txHash',               generateReceipt);
-router.get('/queue/:txHash',                 getQueueJobStatus);
-router.get('/:studentId',                    validateStudentIdParam, getStudentPayments);
+// ── POST routes ───────────────────────────────────────────────────────────────
+router.post('/intent',                 idempotency, validateCreatePaymentIntent, createPaymentIntent);
+router.post('/submit',                 submitTransaction);
+router.post('/verify',                 strictLimiter, idempotency, validateVerifyPayment, verifyPayment);
+router.post('/sync',                   strictLimiter, requireAdminAuth, syncAllPayments);
+router.post('/finalize',               requireAdminAuth, finalizePayments);
+router.post('/dlq/:id/retry',          retryDeadLetterJob);
 
-// ── Payment locking mechanism ────────────────────────────────────────────────
-// ── POST routes ──────────────────────────────────────────────────────────────
-router.post('/intent',                       idempotency, createPaymentIntent);
-router.post('/submit',                       validateSubmitTransaction, submitTransaction);
-router.post('/verify',                       idempotency, validateVerifyPayment, verifyPayment);
-router.post('/sync',                         syncAllPayments);
-router.post('/finalize',                     finalizePayments);
-router.post('/dlq/:id/retry',                retryDeadLetterJob);
+// ── Parameterised GET routes ──────────────────────────────────────────────────
+router.get('/balance/:studentId',      validateStudentIdParam, getStudentBalance);
+router.get('/instructions/:studentId', validateStudentIdParam, getPaymentInstructions);
+router.get('/receipt/:txHash',         generateReceipt);
+router.get('/queue/:txHash',           getQueueJobStatus);
+router.get('/:studentId',              validateStudentIdParam, getStudentPayments);
 
-// ── Payment locking ──────────────────────────────────────────────────────────
-router.post('/:paymentId/lock',              lockPaymentForUpdate);
-router.post('/:paymentId/unlock',            unlockPayment);
+// ── Payment locking ───────────────────────────────────────────────────────────
+router.post('/:paymentId/lock',        lockPaymentForUpdate);
+router.post('/:paymentId/unlock',      unlockPayment);
 
 module.exports = router;

@@ -1,16 +1,31 @@
 'use strict';
 
 require('dotenv').config();
-const config = require('./config');
+const config  = require('./config');
 const express = require('express');
-const cors = require('cors');
+const cors    = require('cors');
 const mongoose = require('mongoose');
 
-const studentRoutes = require('./routes/studentRoutes');
-const paymentRoutes = require('./routes/paymentRoutes');
-const feeRoutes = require('./routes/feeRoutes');
-const { startPolling } = require('./services/transactionService');
-const { runMigrations } = require('./services/migrationRunner');
+const studentRoutes  = require('./routes/studentRoutes');
+const paymentRoutes  = require('./routes/paymentRoutes');
+const feeRoutes      = require('./routes/feeRoutes');
+const reportRoutes   = require('./routes/reportRoutes');
+const schoolRoutes   = require('./routes/schoolRoutes');
+const reminderRoutes = require('./routes/reminderRoutes');
+const disputeRoutes  = require('./routes/disputeRoutes');
+
+const { startPolling, stopPolling }                                   = require('./services/transactionService');
+const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning }     = require('./services/retryService');
+const { startConsistencyScheduler }                                   = require('./services/consistencyScheduler');
+const { startReminderScheduler, stopReminderScheduler }               = require('./services/reminderService');
+const { startWorker: startTxQueueWorker, stopWorker: stopTxQueueWorker } = require('./services/transactionQueueService');
+const { initializeRetryQueue, setupMonitoring }                       = require('./config/retryQueueSetup');
+const { notFoundHandler }                                             = require('./middleware/errorHandler');
+const { requestLogger }                                               = require('./middleware/requestLogger');
+const { createConcurrentRequestMiddleware }                           = require('./middleware/concurrentRequestHandler');
+const { runConsistencyCheck }                                         = require('./controllers/consistencyController');
+const { healthCheck }                                                 = require('./controllers/healthController');
+const logger                                                          = require('./utils/logger');
 
 const app = express();
 
@@ -22,164 +37,29 @@ app.use(cors({
 app.use(express.json());
 app.use(requestLogger());
 
-// Concurrent request handling middleware
 const concurrentMiddleware = createConcurrentRequestMiddleware({
-  circuitBreaker: {
-    failureThreshold: 5,
-    resetTimeoutMs: 30000,
-    halfOpenSuccessThreshold: 2,
-  },
-  queue: {
-    maxConcurrent: 50,
-    maxSize: 1000,
-    defaultTimeoutMs: 30000,
-  },
-  rateLimit: {
-    windowMs: 60000,
-    maxRequests: 100,
-  },
+  circuitBreaker: { failureThreshold: 5, resetTimeoutMs: 30000, halfOpenSuccessThreshold: 2 },
+  queue:          { maxConcurrent: 50, maxSize: 1000, defaultTimeoutMs: 30000 },
+  rateLimit:      { windowMs: 60000, maxRequests: 100 },
   deduplicationTtlMs: 60000,
 });
-
 app.use(concurrentMiddleware.rateLimiter((req) => req.ip));
 app.use(concurrentMiddleware.requestQueue());
 
-app.use((req, res, next) => {
-  res.setTimeout(config.REQUEST_TIMEOUT_MS, () => {
-    const err = new Error(`Request timed out after ${config.REQUEST_TIMEOUT_MS}ms`);
-    err.code = 'REQUEST_TIMEOUT';
-    next(err);
-  });
-  next();
-});
-
-async function gracefulShutdown(signal) {
-  logger.info(`${signal} received, shutting down gracefully`);
-  
-  stopPolling();
-  if (startRetryWorker && startRetryWorker.stop) {
-    startRetryWorker.stop();
-  }
-  
-  try {
-    await database.disconnect();
-    logger.info('Database disconnected');
-  } catch (error) {
-    logger.error('Error disconnecting database', { error: error.message });
-  }
-  
-  process.exit(0);
-}
-
-async function initializeDatabase() {
-  try {
-    await database.connect();
-    logger.info('MongoDB connected with connection pooling');
-    return true;
-  } catch (error) {
-    logger.error('MongoDB connection error', { error: error.message });
-    return false;
-  }
-}
-
-async function initializeServices() {
-  startPolling();
-  startConsistencyScheduler();
-  startRetryWorker();
-  startTxQueueWorker();
-
-  // Initialize BullMQ retry queue system
-
-  try {
-    await initializeRetryQueue(app);
-    setupMonitoring(60000);
-    logger.info('All services initialized successfully');
-  } catch (error) {
-    console.error('Failed to initialize retry queue system:', error);
-  }
-}
-
-    logger.error('Failed to initialize retry queue system', { error: error.message });
-    // Don't crash the app if BullMQ fails - continue with existing retry service
-  }
-}
-
-// ── Startup ─────────────────────────────────────────────────────────────────────
-async function startApp() {
-  const dbConnected = await initializeDatabase();
-
-  if (!dbConnected) {
-    logger.error('Failed to connect to database. Exiting...');
-    process.exit(1);
-  }
-
-  await initializeServices();
-  logger.info('Application startup complete');
-}
-
-// Start the application
-startApp();
-
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/stellaredupay')
-  .then(() => {
-    console.log('MongoDB connected');
-    await runMigrations();
-    startPolling();
-    startConsistencyScheduler();
-    startRetryWorker();
-
-    // Initialize BullMQ retry queue system
-    try {
-      await initializeRetryQueue(app);
-      setupMonitoring(60000);
-      logger.info('All services initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize retry queue system', { error: error.message });
-    }
-  })
-  .catch(err => logger.error('MongoDB error', { error: err.message }));
-
-// Schools — no school context needed (these ARE schools)
-app.use('/api/schools', schoolRoutes);
+// ── Routes ────────────────────────────────────────────────────────────────────
+app.use('/api/schools',   schoolRoutes);
 app.use('/api/students',  studentRoutes);
 app.use('/api/payments',  paymentRoutes);
 app.use('/api/fees',      feeRoutes);
 app.use('/api/reports',   reportRoutes);
 app.use('/api/reminders', reminderRoutes);
-app.use('/api/disputes', disputeRoutes);
+app.use('/api/disputes',  disputeRoutes);
 app.get('/api/consistency', runConsistencyCheck);
-
-const { healthCheck } = require('./controllers/healthController');
 app.get('/health', healthCheck);
-app.get('/health', async (req, res) => {
-  try {
-    const retryQueueStatus = await getSystemStatus();
-    res.json({
-      status: 'ok',
-      network: config.STELLAR_NETWORK,
-      horizonUrl: config.HORIZON_URL,
-      retryQueue: retryQueueStatus,
-      timestamp: new Date.now().toISOString(),
-    });
-  } catch (error) {
-    res.json({
-      status: 'ok',
-      network: config.STELLAR_NETWORK,
-      horizonUrl: config.HORIZON_URL,
-      retryQueue: { error: error.message },
-      timestamp: new Date.now().toISOString(),
-    });
-  }
-});
 
-// ── Global error handler ──────────────────────────────────────────────────────
-app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
-// 404 handler for undefined routes
+// ── Error handling ────────────────────────────────────────────────────────────
 app.use(notFoundHandler);
-
-// Global error handler (must be last)
-app.use(globalErrorHandler);
-app.use((err, req, res, next) => {
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   const statusMap = {
     TX_FAILED:               400,
     MISSING_MEMO:            400,
@@ -209,6 +89,7 @@ mongoose.connect(config.MONGO_URI)
     startPolling();
     startConsistencyScheduler();
     startRetryWorker();
+    startTxQueueWorker();
     startReminderScheduler();
 
     try {
@@ -221,11 +102,7 @@ mongoose.connect(config.MONGO_URI)
   })
   .catch(err => logger.error('MongoDB error', { error: err.message }));
 
-async function startApp() {
-  const dbConnected = await initializeDatabase();
-  
-  if (!dbConnected) {
-    console.error('Failed to connect to database. Exiting...');
+// ── Server ────────────────────────────────────────────────────────────────────
 const PORT = config.PORT;
 const server = app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
 
@@ -235,7 +112,7 @@ async function shutdown(signal) {
 
   stopPolling();
   stopRetryWorker();
-  await stopTxQueueWorker();
+  stopTxQueueWorker();
   stopReminderScheduler();
 
   const deadline = Date.now() + 8_000;
@@ -245,7 +122,7 @@ async function shutdown(signal) {
 
   server.close(async () => {
     try {
-      await database.disconnect();
+      await mongoose.disconnect();
       logger.info('MongoDB disconnected — clean exit');
       process.exit(0);
     } catch (err) {
@@ -257,19 +134,10 @@ async function shutdown(signal) {
   setTimeout(() => {
     logger.error('Forced exit after timeout');
     process.exit(1);
-  }
-  
-  await initializeServices();
-  
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-  
-  const PORT = config.PORT;
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-  
-  console.log('Application startup complete');
+  }, 10_000);
 }
 
-startApp();
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
 
 module.exports = app;

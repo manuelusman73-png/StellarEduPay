@@ -8,6 +8,10 @@ const request = require('supertest');
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
+jest.mock('../backend/src/middleware/auth', () => ({
+  requireAdminAuth: (req, res, next) => next(),
+}));
+
 jest.mock('mongoose', () => ({
   connect: jest.fn().mockResolvedValue(true),
   Schema: class {

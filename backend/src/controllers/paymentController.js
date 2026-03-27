@@ -830,6 +830,42 @@ async function unlockPayment(req, res, next) {
   }
 }
 
+async function getDeadLetterJobs(req, res, next) {
+  try {
+    const { getDeadLetterQueue } = require('../config/retryQueueSetup');
+    const queue = getDeadLetterQueue();
+    const jobs = queue ? await queue.getFailed(0, 99) : [];
+    res.json({ jobs: jobs.map(j => ({ id: j.id, name: j.name, data: j.data, failedReason: j.failedReason })) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function retryDeadLetterJob(req, res, next) {
+  try {
+    const { getDeadLetterQueue } = require('../config/retryQueueSetup');
+    const { jobId } = req.params;
+    const queue = getDeadLetterQueue();
+    if (!queue) return res.status(503).json({ error: 'Retry queue unavailable', code: 'SERVICE_UNAVAILABLE' });
+    const job = await queue.getJob(jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found', code: 'NOT_FOUND' });
+    await job.retry();
+    res.json({ message: 'Job queued for retry', jobId });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getQueueJobStatus(req, res, next) {
+  try {
+    const { getRetryQueueStatus } = require('../config/retryQueueSetup');
+    const status = await getRetryQueueStatus();
+    res.json(status || { available: false });
+  } catch (err) {
+    next(err);
+  }
+}
+
 function streamPaymentEvents(req, res) {
   const { addClient, removeClient } = require('../services/sseService');
   const schoolId = req.schoolId;
