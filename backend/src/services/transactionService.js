@@ -1,51 +1,97 @@
-'use strict';
+"use strict";
 
 /**
- * Transaction Poller
+ * Auto-sync service
  *
- * Polls all active schools' Stellar wallets on a fixed interval.
- * Before multi-school support this polled a single global wallet;
- * now it fans out to every active school in parallel.
+ * Polls all active schools' Stellar wallets on a configurable interval.
+ *
+ * Configuration:
+ *   SYNC_INTERVAL_MS  — polling interval in ms (default: 60000).
+ *                       Set to 0 to disable auto-sync entirely.
+ *                       Falls back to POLL_INTERVAL_MS for backwards compatibility.
+ *
+ * Manual sync (POST /api/payments/sync) works independently and is unaffected.
  */
 
-const School = require('../models/schoolModel');
-const { syncPaymentsForSchool } = require('./stellarService');
-const { POLL_INTERVAL_MS } = require('../config');
-const logger = require('../utils/logger').child('TransactionPoller');
+const School = require("../models/schoolModel");
+const { syncPaymentsForSchool } = require("./stellarService");
+const { SYNC_INTERVAL_MS } = require("../config");
+const logger = require("../utils/logger").child("AutoSync");
 
 let _timer = null;
 
-function startPolling() {
-  if (_timer) return;
-  logger.info(`Starting — interval: ${POLL_INTERVAL_MS}ms`);
+async function runSyncCycle() {
+  const startedAt = new Date().toISOString();
 
-  const run = async () => {
-    try {
-      const schools = await School.find({ isActive: true }).lean();
-      if (schools.length === 0) return;
+  let schools;
+  try {
+    schools = await School.find({ isActive: true }).lean();
+  } catch (err) {
+    logger.error("Failed to fetch active schools", { error: err.message });
+    return;
+  }
 
-      const results = await Promise.allSettled(schools.map(s => syncPaymentsForSchool(s)));
+  if (schools.length === 0) {
+    logger.debug("Auto-sync: no active schools");
+    return;
+  }
 
-      results.forEach((result, i) => {
-        if (result.status === 'rejected') {
-          logger.error(`Sync error for school ${schools[i].schoolId}`, { error: result.reason?.message, schoolId: schools[i].schoolId });
-        }
+  const results = await Promise.allSettled(
+    schools.map((s) => syncPaymentsForSchool(s)),
+  );
+
+  let totalNew = 0;
+  results.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+      const { newPayments = 0 } = result.value || {};
+      totalNew += newPayments;
+      if (newPayments > 0) {
+        logger.info("Auto-sync: new payments detected", {
+          schoolId: schools[i].schoolId,
+          newPayments,
+          timestamp: startedAt,
+        });
+      }
+    } else {
+      logger.error("Auto-sync: school sync failed", {
+        schoolId: schools[i].schoolId,
+        error: result.reason?.message,
+        timestamp: startedAt,
       });
-    } catch (err) {
-      logger.error('Fatal sync error', { error: err.message, stack: err.stack });
     }
-  };
+  });
 
-  run();
-  _timer = setInterval(run, POLL_INTERVAL_MS);
-  _timer.unref();
+  logger.info("Auto-sync cycle complete", {
+    timestamp: startedAt,
+    schools: schools.length,
+    newPayments: totalNew,
+  });
+}
+
+function startPolling() {
+  if (SYNC_INTERVAL_MS === 0) {
+    logger.info("Auto-sync disabled (SYNC_INTERVAL_MS=0)");
+    return;
+  }
+
+  if (_timer) {
+    logger.warn("Auto-sync already running");
+    return;
+  }
+
+  logger.info(`Auto-sync starting — interval: ${SYNC_INTERVAL_MS}ms`);
+
+  // Run immediately on startup, then on each interval
+  runSyncCycle();
+  _timer = setInterval(runSyncCycle, SYNC_INTERVAL_MS);
+  _timer.unref(); // don't block process exit
 }
 
 function stopPolling() {
   if (_timer) {
     clearInterval(_timer);
     _timer = null;
-    logger.info('Stopped');
+    logger.info("Auto-sync stopped");
   }
 }
 

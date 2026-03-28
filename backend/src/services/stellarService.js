@@ -1,18 +1,22 @@
-'use strict';
+"use strict";
 
-const { server, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/stellarConfig');
-const Payment = require('../models/paymentModel');
-const Student = require('../models/studentModel');
-const PaymentIntent = require('../models/paymentIntentModel');
-const { validatePaymentAmount } = require('../utils/paymentLimits');
-const { generateReferenceCode } = require('../utils/generateReferenceCode');
-const { withStellarRetry } = require('../utils/withStellarRetry');
-const logger = require('../utils/logger').child('StellarService');
+const {
+  server,
+  isAcceptedAsset,
+  CONFIRMATION_THRESHOLD,
+} = require("../config/stellarConfig");
+const Payment = require("../models/paymentModel");
+const Student = require("../models/studentModel");
+const PaymentIntent = require("../models/paymentIntentModel");
+const { validatePaymentAmount } = require("../utils/paymentLimits");
+const { generateReferenceCode } = require("../utils/generateReferenceCode");
+const { withStellarRetry } = require("../utils/withStellarRetry");
+const logger = require("../utils/logger").child("StellarService");
 
 function detectAsset(payOp) {
   const assetType = payOp.asset_type;
-  const assetCode = assetType === 'native' ? 'XLM' : payOp.asset_code;
-  const assetIssuer = assetType === 'native' ? null : payOp.asset_issuer;
+  const assetCode = assetType === "native" ? "XLM" : payOp.asset_code;
+  const assetIssuer = assetType === "native" ? null : payOp.asset_issuer;
   const { accepted } = isAcceptedAsset(assetCode, assetType);
   if (!accepted) return null;
   return { assetCode, assetType, assetIssuer };
@@ -33,11 +37,12 @@ async function extractValidPayment(tx, walletAddress) {
   const memo = tx.memo ? tx.memo.trim() : null;
   if (!memo) return null;
 
-  const ops = await withStellarRetry(
-    () => tx.operations(),
-    { label: 'extractValidPayment.operations' }
+  const ops = await withStellarRetry(() => tx.operations(), {
+    label: "extractValidPayment.operations",
+  });
+  const payOp = ops.records.find(
+    (op) => op.type === "payment" && op.to === walletAddress,
   );
-  const payOp = ops.records.find(op => op.type === 'payment' && op.to === walletAddress);
   if (!payOp) return null;
 
   const asset = detectAsset(payOp);
@@ -49,7 +54,7 @@ async function extractValidPayment(tx, walletAddress) {
 function validatePaymentAgainstFee(paymentAmount, expectedFee) {
   if (paymentAmount < expectedFee) {
     return {
-      status: 'underpaid',
+      status: "underpaid",
       excessAmount: 0,
       message: `Payment of ${paymentAmount} is less than the required fee of ${expectedFee}`,
     };
@@ -57,25 +62,25 @@ function validatePaymentAgainstFee(paymentAmount, expectedFee) {
   if (paymentAmount > expectedFee) {
     const excess = parseFloat((paymentAmount - expectedFee).toFixed(7));
     return {
-      status: 'overpaid',
+      status: "overpaid",
       excessAmount: excess,
       message: `Payment of ${paymentAmount} exceeds the required fee of ${expectedFee} by ${excess}`,
     };
   }
   return {
-    status: 'valid',
+    status: "valid",
     excessAmount: 0,
-    message: 'Payment matches the required fee',
+    message: "Payment matches the required fee",
   };
 }
 
 async function checkConfirmationStatus(txLedger) {
   const latestLedger = await withStellarRetry(
-    () => server.ledgers().order('desc').limit(1).call(),
-    { label: 'checkConfirmationStatus' }
+    () => server.ledgers().order("desc").limit(1).call(),
+    { label: "checkConfirmationStatus" },
   );
   const latestSequence = latestLedger.records[0].sequence;
-  return (latestSequence - txLedger) >= CONFIRMATION_THRESHOLD;
+  return latestSequence - txLedger >= CONFIRMATION_THRESHOLD;
 }
 
 /**
@@ -83,7 +88,14 @@ async function checkConfirmationStatus(txLedger) {
  * or payment amount is wildly outside the expected fee range.
  * Query is school-scoped via schoolId.
  */
-async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedFee, txDate, schoolId) {
+async function detectMemoCollision(
+  memo,
+  senderAddress,
+  paymentAmount,
+  expectedFee,
+  txDate,
+  schoolId,
+) {
   const COLLISION_WINDOW_MS = 24 * 60 * 60 * 1000;
   const windowStart = new Date(txDate.getTime() - COLLISION_WINDOW_MS);
 
@@ -97,7 +109,12 @@ async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedF
   if (recentFromOtherSender) {
     return {
       suspicious: true,
-      reason: 'Memo "' + memo + '" was used by a different sender (' + recentFromOtherSender.senderAddress + ') within the last 24 hours',
+      reason:
+        'Memo "' +
+        memo +
+        '" was used by a different sender (' +
+        recentFromOtherSender.senderAddress +
+        ") within the last 24 hours",
     };
   }
 }
@@ -111,10 +128,16 @@ async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedF
  *
  * Returns { suspicious: boolean, reason: string|null }
  */
-async function detectAbnormalPatterns(senderAddress, paymentAmount, expectedFee, txDate, schoolId) {
+async function detectAbnormalPatterns(
+  senderAddress,
+  paymentAmount,
+  expectedFee,
+  txDate,
+  schoolId,
+) {
   const RAPID_TX_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
-  const RAPID_TX_LIMIT = 3;                   // more than this many = suspicious
-  const UNUSUAL_AMOUNT_MULTIPLIER = 3;        // >3× or <1/3 of expected fee
+  const RAPID_TX_LIMIT = 3; // more than this many = suspicious
+  const UNUSUAL_AMOUNT_MULTIPLIER = 3; // >3× or <1/3 of expected fee
 
   const reasons = [];
 
@@ -128,7 +151,7 @@ async function detectAbnormalPatterns(senderAddress, paymentAmount, expectedFee,
     });
     if (recentCount >= RAPID_TX_LIMIT) {
       reasons.push(
-        `Sender ${senderAddress} made ${recentCount + 1} transactions within 10 minutes`
+        `Sender ${senderAddress} made ${recentCount + 1} transactions within 10 minutes`,
       );
     }
   }
@@ -136,15 +159,18 @@ async function detectAbnormalPatterns(senderAddress, paymentAmount, expectedFee,
   // 2. Unusual amount check
   if (expectedFee && expectedFee > 0) {
     const ratio = paymentAmount / expectedFee;
-    if (ratio > UNUSUAL_AMOUNT_MULTIPLIER || ratio < 1 / UNUSUAL_AMOUNT_MULTIPLIER) {
+    if (
+      ratio > UNUSUAL_AMOUNT_MULTIPLIER ||
+      ratio < 1 / UNUSUAL_AMOUNT_MULTIPLIER
+    ) {
       reasons.push(
-        `Unusual payment amount ${paymentAmount} vs expected fee ${expectedFee} (ratio ${ratio.toFixed(2)})`
+        `Unusual payment amount ${paymentAmount} vs expected fee ${expectedFee} (ratio ${ratio.toFixed(2)})`,
       );
     }
   }
 
   if (reasons.length > 0) {
-    return { suspicious: true, reason: reasons.join('; ') };
+    return { suspicious: true, reason: reasons.join("; ") };
   }
   return { suspicious: false, reason: null };
 }
@@ -155,10 +181,14 @@ async function detectAbnormalPatterns(senderAddress, paymentAmount, expectedFee,
  * data must include schoolId.
  */
 async function recordPayment(data) {
-  const exists = await Payment.findOne({ transactionHash: data.transactionHash });
+  const exists = await Payment.findOne({
+    transactionHash: data.transactionHash,
+  });
   if (exists) {
-    const err = new Error(`Transaction ${data.transactionHash} has already been processed`);
-    err.code = 'DUPLICATE_TX';
+    const err = new Error(
+      `Transaction ${data.transactionHash} has already been processed`,
+    );
+    err.code = "DUPLICATE_TX";
     throw err;
   }
   if (!data.referenceCode) {
@@ -168,12 +198,21 @@ async function recordPayment(data) {
     return await Payment.create(data);
   } catch (e) {
     if (e.code === 11000) {
-      const err = new Error(`Transaction ${data.transactionHash} has already been processed`);
-      err.code = 'DUPLICATE_TX';
-      logger.warn('Duplicate transaction rejected', { txHash: data.transactionHash, schoolId: data.schoolId });
+      const err = new Error(
+        `Transaction ${data.transactionHash} has already been processed`,
+      );
+      err.code = "DUPLICATE_TX";
+      logger.warn("Duplicate transaction rejected", {
+        txHash: data.transactionHash,
+        schoolId: data.schoolId,
+      });
       throw err;
     }
-    logger.error('Failed to record payment', { error: e.message, txHash: data.transactionHash, schoolId: data.schoolId });
+    logger.error("Failed to record payment", {
+      error: e.message,
+      txHash: data.transactionHash,
+      schoolId: data.schoolId,
+    });
     throw e;
   }
 }
@@ -185,39 +224,49 @@ async function recordPayment(data) {
 async function verifyTransaction(txHash, walletAddress) {
   const tx = await withStellarRetry(
     () => server.transactions().transaction(txHash).call(),
-    { label: 'verifyTransaction' }
+    { label: "verifyTransaction" },
   );
 
   // 1. Validate transaction success
   if (tx.successful === false) {
-    const err = new Error('Transaction was not successful on the Stellar network');
-    err.code = 'TX_FAILED';
+    const err = new Error(
+      "Transaction was not successful on the Stellar network",
+    );
+    err.code = "TX_FAILED";
     throw err;
   }
 
   const memo = tx.memo ? tx.memo.trim() : null;
   if (!memo) {
-    const err = new Error('Transaction memo is missing or empty — cannot identify student');
-    err.code = 'MISSING_MEMO';
+    const err = new Error(
+      "Transaction memo is missing or empty — cannot identify student",
+    );
+    err.code = "MISSING_MEMO";
     throw err;
   }
 
-  const ops = await withStellarRetry(
-    () => tx.operations(),
-    { label: 'verifyTransaction.operations' }
+  const ops = await withStellarRetry(() => tx.operations(), {
+    label: "verifyTransaction.operations",
+  });
+  const payOp = ops.records.find(
+    (op) => op.type === "payment" && op.to === walletAddress,
   );
-  const payOp = ops.records.find(op => op.type === 'payment' && op.to === walletAddress);
   if (!payOp) {
-    const err = new Error(`No payment operation found targeting the school wallet (${walletAddress})`);
-    err.code = 'INVALID_DESTINATION';
+    const err = new Error(
+      `No payment operation found targeting the school wallet (${walletAddress})`,
+    );
+    err.code = "INVALID_DESTINATION";
     throw err;
   }
 
   const asset = detectAsset(payOp);
   if (!asset) {
-    const assetCode = payOp.asset_type === 'native' ? 'XLM' : (payOp.asset_code || payOp.asset_type);
+    const assetCode =
+      payOp.asset_type === "native"
+        ? "XLM"
+        : payOp.asset_code || payOp.asset_type;
     const err = new Error(`Unsupported asset: ${assetCode}`);
-    err.code = 'UNSUPPORTED_ASSET';
+    err.code = "UNSUPPORTED_ASSET";
     err.assetCode = assetCode;
     throw err;
   }
@@ -236,13 +285,18 @@ async function verifyTransaction(txHash, walletAddress) {
   //    since memo = studentId; recordPayment caller passes schoolId explicitly)
   const student = await Student.findOne({ studentId: memo });
   const feeAmount = student ? student.feeAmount : null;
-  
-  const feeValidation = feeAmount != null
-    ? validatePaymentAgainstFee(amount, feeAmount)
-    : { status: 'unknown', excessAmount: 0, message: 'Student not found, cannot validate fee' };
+
+  const feeValidation =
+    feeAmount != null
+      ? validatePaymentAgainstFee(amount, feeAmount)
+      : {
+          status: "unknown",
+          excessAmount: 0,
+          message: "Student not found, cannot validate fee",
+        };
 
   // Extract network fee from transaction
-  const networkFee = parseFloat(tx.fee_paid || '0') / 10000000; // Convert stroops to XLM
+  const networkFee = parseFloat(tx.fee_paid || "0") / 10000000; // Convert stroops to XLM
 
   return {
     hash: tx.hash,
@@ -269,30 +323,42 @@ async function syncPaymentsForSchool(school) {
   const { schoolId, stellarAddress } = school;
 
   let page = await withStellarRetry(
-    () => server
-      .transactions()
-      .forAccount(stellarAddress)
-      .order('desc')
-      .limit(200)
-      .call(),
-    { label: `syncPaymentsForSchool(${schoolId})` }
+    () =>
+      server
+        .transactions()
+        .forAccount(stellarAddress)
+        .order("desc")
+        .limit(200)
+        .call(),
+    { label: `syncPaymentsForSchool(${schoolId})` },
   );
 
   let done = false;
+  let newPayments = 0;
   while (!done) {
     for (const tx of page.records) {
       const existing = await Payment.findOne({ txHash: tx.hash });
-      if (existing) { done = true; break; }
+      if (existing) {
+        done = true;
+        break;
+      }
 
       const valid = await extractValidPayment(tx, stellarAddress);
       if (!valid) continue;
 
       const { payOp, memo } = valid;
 
-      const intent = await PaymentIntent.findOne({ schoolId, memo, status: 'pending' });
+      const intent = await PaymentIntent.findOne({
+        schoolId,
+        memo,
+        status: "pending",
+      });
       if (!intent) continue;
 
-      const student = await Student.findOne({ schoolId, studentId: intent.studentId });
+      const student = await Student.findOne({
+        schoolId,
+        studentId: intent.studentId,
+      });
       if (!student) continue;
 
       const paymentAmount = parseFloat(payOp.amount);
@@ -303,76 +369,131 @@ async function syncPaymentsForSchool(school) {
       const senderAddress = payOp.from || null;
       const txDate = new Date(tx.created_at);
       const txLedger = tx.ledger_attr || tx.ledger || null;
-      const isConfirmed = txLedger ? await checkConfirmationStatus(txLedger) : false;
-      const confirmationStatus = isConfirmed ? 'confirmed' : 'pending_confirmation';
+      const isConfirmed = txLedger
+        ? await checkConfirmationStatus(txLedger)
+        : false;
+      const confirmationStatus = isConfirmed
+        ? "confirmed"
+        : "pending_confirmation";
 
-      const collision = await detectMemoCollision(memo, senderAddress, paymentAmount, student.feeAmount, txDate, schoolId);
+      const collision = await detectMemoCollision(
+        memo,
+        senderAddress,
+        paymentAmount,
+        student.feeAmount,
+        txDate,
+        schoolId,
+      );
 
       const previousPayments = await Payment.aggregate([
         { $match: { schoolId, studentId: intent.studentId } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
       ]);
-      const previousTotal = previousPayments.length ? previousPayments[0].total : 0;
-      const cumulativeTotal = parseFloat((previousTotal + paymentAmount).toFixed(7));
+      const previousTotal = previousPayments.length
+        ? previousPayments[0].total
+        : 0;
+      const cumulativeTotal = parseFloat(
+        (previousTotal + paymentAmount).toFixed(7),
+      );
 
       let cumulativeStatus;
-      if (cumulativeTotal < student.feeAmount) cumulativeStatus = 'underpaid';
-      else if (cumulativeTotal > student.feeAmount) cumulativeStatus = 'overpaid';
-      else cumulativeStatus = 'valid';
+      if (cumulativeTotal < student.feeAmount) cumulativeStatus = "underpaid";
+      else if (cumulativeTotal > student.feeAmount)
+        cumulativeStatus = "overpaid";
+      else cumulativeStatus = "valid";
 
-      const excessAmount = cumulativeStatus === 'overpaid'
-        ? parseFloat((cumulativeTotal - student.feeAmount).toFixed(7))
-        : 0;
+      const excessAmount =
+        cumulativeStatus === "overpaid"
+          ? parseFloat((cumulativeTotal - student.feeAmount).toFixed(7))
+          : 0;
 
-      const feeValidation = validatePaymentAgainstFee(paymentAmount, intent.amount);
+      const feeValidation = validatePaymentAgainstFee(
+        paymentAmount,
+        intent.amount,
+      );
 
-      if (feeValidation.status === 'underpaid') {
-        logger.warn('Underpaid transaction skipped', {
-          txHash: tx.hash, schoolId, studentId: intent.studentId,
-          paid: paymentAmount, required: intent.amount,
+      if (feeValidation.status === "underpaid") {
+        logger.warn("Underpaid transaction skipped", {
+          txHash: tx.hash,
+          schoolId,
+          studentId: intent.studentId,
+          paid: paymentAmount,
+          required: intent.amount,
         });
         await Payment.create({
-          schoolId, studentId: intent.studentId, txHash: tx.hash,
-          amount: paymentAmount, feeAmount: intent.amount,
-          feeValidationStatus: 'underpaid', excessAmount: 0, status: 'FAILED',
-          memo, senderAddress, isSuspicious: true,
-          suspicionReason: feeValidation.message, ledger: txLedger,
-          confirmationStatus: 'failed', confirmedAt: txDate,
+          schoolId,
+          studentId: intent.studentId,
+          txHash: tx.hash,
+          amount: paymentAmount,
+          feeAmount: intent.amount,
+          feeValidationStatus: "underpaid",
+          excessAmount: 0,
+          status: "FAILED",
+          memo,
+          senderAddress,
+          isSuspicious: true,
+          suspicionReason: feeValidation.message,
+          ledger: txLedger,
+          confirmationStatus: "failed",
+          confirmedAt: txDate,
         });
+        newPayments++;
         continue;
       }
 
       await Payment.create({
-        schoolId, studentId: intent.studentId, txHash: tx.hash,
-        amount: paymentAmount, feeAmount: intent.amount,
-        feeValidationStatus: cumulativeStatus, excessAmount, status: 'confirmed',
-        memo, senderAddress, isSuspicious: collision.suspicious,
-        suspicionReason: collision.reason, ledger: txLedger,
-        confirmationStatus, confirmedAt: txDate,
+        schoolId,
+        studentId: intent.studentId,
+        txHash: tx.hash,
+        amount: paymentAmount,
+        feeAmount: intent.amount,
+        feeValidationStatus: cumulativeStatus,
+        excessAmount,
+        status: "confirmed",
+        memo,
+        senderAddress,
+        isSuspicious: collision.suspicious,
+        suspicionReason: collision.reason,
+        ledger: txLedger,
+        confirmationStatus,
+        confirmedAt: txDate,
       });
+      newPayments++;
 
-      logger.info('Transaction recorded', {
-        txHash: tx.hash, schoolId, studentId: intent.studentId,
-        amount: paymentAmount, feeValidationStatus: cumulativeStatus,
-        isSuspicious: collision.suspicious, confirmationStatus,
+      logger.info("Transaction recorded", {
+        txHash: tx.hash,
+        schoolId,
+        studentId: intent.studentId,
+        amount: paymentAmount,
+        feeValidationStatus: cumulativeStatus,
+        isSuspicious: collision.suspicious,
+        confirmationStatus,
       });
 
       if (isConfirmed && !collision.suspicious) {
         await Student.findOneAndUpdate(
           { schoolId, studentId: intent.studentId },
-          { totalPaid: cumulativeTotal, feePaid: cumulativeTotal >= student.feeAmount }
+          {
+            totalPaid: cumulativeTotal,
+            feePaid: cumulativeTotal >= student.feeAmount,
+          },
         );
       }
 
-      await PaymentIntent.findByIdAndUpdate(intent._id, { status: 'completed' });
+      await PaymentIntent.findByIdAndUpdate(intent._id, {
+        status: "completed",
+      });
     }
 
     if (!done) {
       if (page.records.length < 200) break; // last page
-      page = await withStellarRetry(() => page.next(), { label: `syncPaymentsForSchool.next(${schoolId})` });
+      page = await withStellarRetry(() => page.next(), {
+        label: `syncPaymentsForSchool.next(${schoolId})`,
+      });
       if (!page || !page.records.length) break;
     }
   }
+  return { newPayments };
 }
 
 /**
@@ -384,7 +505,7 @@ async function syncPaymentsForSchool(school) {
 async function finalizeConfirmedPayments(schoolId) {
   const pending = await Payment.find({
     schoolId,
-    confirmationStatus: 'pending_confirmation',
+    confirmationStatus: "pending_confirmation",
     isSuspicious: false,
   });
 
@@ -393,23 +514,37 @@ async function finalizeConfirmedPayments(schoolId) {
     const isConfirmed = await checkConfirmationStatus(payment.ledgerSequence);
     if (!isConfirmed) continue;
 
-    if (typeof Payment.findByIdAndUpdate === 'function') {
-      await Payment.findByIdAndUpdate(payment._id, { confirmationStatus: 'confirmed' });
+    if (typeof Payment.findByIdAndUpdate === "function") {
+      await Payment.findByIdAndUpdate(payment._id, {
+        confirmationStatus: "confirmed",
+      });
     }
 
-    const student = await Student.findOne({ schoolId, studentId: payment.studentId });
+    const student = await Student.findOne({
+      schoolId,
+      studentId: payment.studentId,
+    });
     if (!student) continue;
 
     const agg = await Payment.aggregate([
-      { $match: { schoolId, studentId: payment.studentId, confirmationStatus: 'confirmed', isSuspicious: false } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
+      {
+        $match: {
+          schoolId,
+          studentId: payment.studentId,
+          confirmationStatus: "confirmed",
+          isSuspicious: false,
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
     const totalPaid = agg.length ? parseFloat(agg[0].total.toFixed(7)) : 0;
-    const remainingBalance = parseFloat(Math.max(0, student.feeAmount - totalPaid).toFixed(7));
+    const remainingBalance = parseFloat(
+      Math.max(0, student.feeAmount - totalPaid).toFixed(7),
+    );
 
     await Student.findOneAndUpdate(
       { schoolId, studentId: payment.studentId },
-      { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount }
+      { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount },
     );
   }
 }
@@ -424,17 +559,26 @@ async function parseIncomingTransaction(txHash, walletAddress = null) {
 
   const ops = await tx.operations();
   const payments = ops.records
-    .filter(op => op.type === 'payment' && (!walletAddress || op.to === walletAddress))
-    .map(op => ({
+    .filter(
+      (op) =>
+        op.type === "payment" && (!walletAddress || op.to === walletAddress),
+    )
+    .map((op) => ({
       from: op.from || null,
       to: op.to,
       amount: normalizeAmount(op.amount),
-      assetCode: op.asset_type === 'native' ? 'XLM' : op.asset_code,
+      assetCode: op.asset_type === "native" ? "XLM" : op.asset_code,
       assetType: op.asset_type,
       assetIssuer: op.asset_issuer || null,
     }));
 
-  return { hash: tx.hash, successful: tx.successful, memo, payments, created_at: tx.created_at };
+  return {
+    hash: tx.hash,
+    successful: tx.successful,
+    memo,
+    payments,
+    created_at: tx.created_at,
+  };
 }
 
 module.exports = {
