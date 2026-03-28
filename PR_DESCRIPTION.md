@@ -27,7 +27,7 @@ Closes #234
 - Fraud detection — memo collision and abnormal pattern checks
 - Retry behaviour — `withStellarRetry` backoff formula and env overrides
 
-## Acceptance Criteria
+## Implementation Details
 
 - [x] Contributors understand how to work with the Stellar integration layer
 - [x] Memo-based identification is clearly explained

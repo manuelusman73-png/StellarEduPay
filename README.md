@@ -352,7 +352,7 @@ Create a `.env.local` file in the `frontend/` directory:
 
 ```bash
 cd ../frontend
-cp .env.example .env.local
+cp .env.local.example .env.local
 ```
 
 Edit `frontend/.env.local`:
