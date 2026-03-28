@@ -1,34 +1,35 @@
-# Write Stellar Integration Documentation
+# Add Dockerfile for Frontend Service
 
-Closes #234
+Closes #235
 
 ## Summary
 
-`docs/stellar-integration.md` had only a brief overview. This PR rewrites it as a full contributor reference covering every aspect of the Stellar integration layer.
+`docker-compose.yml` references `build: ./frontend` but no `Dockerfile` existed, causing `docker compose up` to fail for the frontend service. This PR adds the missing file along with the required Next.js config for standalone output.
 
 ## Changes
+
+### New Files
+
+| File | Description |
+| ---- | ----------- |
+| [`frontend/Dockerfile`](frontend/Dockerfile) | Multi-stage Docker build for the Next.js frontend |
+| [`frontend/next.config.js`](frontend/next.config.js) | Enables `output: 'standalone'` required by the Docker runner stage |
 
 ### Modified Files
 
 | File | Description |
 | ---- | ----------- |
-| [`docs/stellar-integration.md`](docs/stellar-integration.md) | Full rewrite with all required sections |
-
-## What's Documented
-
-- Testnet vs mainnet configuration — how `STELLAR_NETWORK` drives `HORIZON_URL`, `USDC_ISSUER`, and `networkPassphrase`
-- Testnet setup instructions — generating a wallet, funding with Friendbot, sending a test payment
-- Memo field — how student IDs are embedded, matched, and optionally encrypted
-- Accepted assets — `ACCEPTED_ASSET` env var, `ALL_ASSETS` config, how to add a new asset
-- `syncPaymentsForSchool` — 10-step walkthrough with code snippets from `stellarService.js`
-- `verifyTransaction` — step-by-step flow with all error codes
-- Fee validation — `valid` / `overpaid` / `underpaid` / `unknown` outcomes
-- Confirmation threshold — ledger-based safety margin and `finalizeConfirmedPayments`
-- Fraud detection — memo collision and abnormal pattern checks
-- Retry behaviour — `withStellarRetry` backoff formula and env overrides
+| [`docker-compose.yml`](docker-compose.yml) | Passes `NEXT_PUBLIC_API_URL` as a build arg so it is baked in at build time |
 
 ## Implementation Details
 
-- [x] Contributors understand how to work with the Stellar integration layer
-- [x] Memo-based identification is clearly explained
-- [x] Testnet setup instructions are included
+- Two-stage build: `builder` compiles the Next.js app, `runner` serves only the standalone output (smaller final image)
+- `NEXT_PUBLIC_API_URL` is passed as a `ARG`/`ENV` during the build stage — Next.js inlines `NEXT_PUBLIC_*` vars at compile time, so a runtime `environment:` entry alone is not sufficient
+- Runs as a non-root user (`appuser`) for security
+- `output: 'standalone'` in `next.config.js` produces a self-contained `server.js` with minimal dependencies
+
+## Acceptance Criteria
+
+- [x] `docker compose up` builds and starts the frontend container successfully
+- [x] Frontend is accessible at `http://localhost:3000`
+- [x] `NEXT_PUBLIC_API_URL` is correctly injected at build time
