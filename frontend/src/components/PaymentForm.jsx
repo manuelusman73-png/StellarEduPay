@@ -1,10 +1,12 @@
 import { useState, useRef } from 'react';
-import { getStudent, getPaymentInstructions } from '../services/api';
+import { getStudent, getPaymentInstructions, getStudentPayments } from '../services/api';
+import TransactionCard from './TransactionCard';
 
 export default function PaymentForm() {
   const [studentId, setStudentId]       = useState('');
   const [student, setStudent]           = useState(null);
   const [instructions, setInstructions] = useState(null);
+  const [payments, setPayments]         = useState(null);
   const [error, setError]               = useState('');
   const [loading, setLoading]           = useState(false);
   const [copiedField, setCopiedField]   = useState(null);
@@ -15,12 +17,14 @@ export default function PaymentForm() {
     setError('');
     setLoading(true);
     try {
-      const [stuRes, instrRes] = await Promise.all([
+      const [stuRes, instrRes, paymentsRes] = await Promise.all([
         getStudent(studentId),
         getPaymentInstructions(studentId),
+        getStudentPayments(studentId),
       ]);
       setStudent(stuRes.data);
       setInstructions(instrRes.data);
+      setPayments(paymentsRes.data ?? []);
     } catch {
       setError('Student not found. Please check the ID.');
       errorRef.current?.focus();
@@ -201,6 +205,19 @@ export default function PaymentForm() {
           <p style={{ fontSize: '0.85rem', color: '#555', marginTop: '0.75rem' }}>
             {instructions.note}
           </p>
+        </div>
+      )}
+
+      {payments !== null && (
+        <div style={{ marginTop: '1.5rem' }}>
+          <h3 style={{ marginBottom: '0.75rem' }}>Payment History</h3>
+          {payments.length === 0 ? (
+            <p style={{ color: '#888', fontStyle: 'italic' }}>No payments recorded yet.</p>
+          ) : (
+            payments.map(p => (
+              <TransactionCard key={p.txHash || p._id} payment={p} />
+            ))
+          )}
         </div>
       )}
     </div>

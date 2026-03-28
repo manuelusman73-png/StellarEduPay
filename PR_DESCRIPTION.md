@@ -1,10 +1,10 @@
-# Add Verify Transaction UI to Pay Fees Page
+# PaymentForm: Show Payment History After Lookup
 
-Closes #230
+Closes #229
 
 ## Summary
 
-`POST /api/payments/verify` existed but had no frontend interface. Parents had no way to confirm their payment was recorded without contacting the school. This PR adds a Verify Payment section to the pay-fees page.
+After a parent looked up a student, they saw payment instructions but no history of past payments. `GET /api/payments/:studentId` existed but was never called from the frontend. This PR wires it up and renders results using the existing `TransactionCard` component.
 # Add Dockerfile for Frontend Service
 
 Closes #235
@@ -19,7 +19,27 @@ Closes #235
 
 | File | Description |
 | ---- | ----------- |
-| [`frontend/src/components/VerifyPayment.jsx`](frontend/src/components/VerifyPayment.jsx) | Self-contained verify form — input, submit, result display, error handling |
+| [`frontend/src/components/PaymentForm.jsx`](frontend/src/components/PaymentForm.jsx) | Fetches payment history in `handleSubmit`, renders it below instructions |
+
+## Implementation
+
+`getStudentPayments` is added to the existing `Promise.all` in `handleSubmit` so all three requests fire in parallel — no extra loading time:
+
+```js
+const [stuRes, instrRes, paymentsRes] = await Promise.all([
+  getStudent(studentId),
+  getPaymentInstructions(studentId),
+  getStudentPayments(studentId),
+]);
+```
+
+Results are rendered with `<TransactionCard />`. An empty array shows "No payments recorded yet."
+
+## Acceptance Criteria
+
+- [x] Payment history is displayed after a successful student lookup
+- [x] Each payment shows hash, amount, and date
+- [x] Empty state is handled gracefully
 | [`frontend/Dockerfile`](frontend/Dockerfile) | Multi-stage Docker build for the Next.js frontend |
 | [`frontend/next.config.js`](frontend/next.config.js) | Enables `output: 'standalone'` required by the Docker runner stage |
 
