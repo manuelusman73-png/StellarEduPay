@@ -2,6 +2,7 @@
 
 const { getCurrentServer, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/stellarConfig');
 const { networkMonitor } = require('./network-monitor.service');
+const { validateTransactionFreshness, validateHorizonResponseFreshness } = require('./staleDataValidator');
 const Payment = require('../models/paymentModel');
 const Student = require('../models/studentModel');
 const PaymentIntent = require('../models/paymentIntentModel');
@@ -224,6 +225,9 @@ async function recordPayment(data) {
 async function verifyTransaction(txHash, walletAddress) {
   const currentServer = getCurrentServer();
   const tx = await currentServer.transactions().transaction(txHash).call();
+
+  // NEW: Validate data freshness before processing
+  validateTransactionFreshness(tx);
 
   // 1. Validate transaction success
   if (tx.successful === false) {

@@ -19,6 +19,8 @@ const {
   finalizeConfirmedPayments,
   validatePaymentWithDynamicFee,
 } = require("../services/stellarService");
+const { validateDataFreshness } = require('../services/staleDataValidator');
+const StaleDataError = require('../errors/StaleDataError');
 const { queueForRetry } = require("../services/retryService");
 const {
   enqueueTransaction,
@@ -31,6 +33,10 @@ const {
 } = require("../config/stellarConfig");
 const { validateTransactionHash } = require("../utils/hashValidator");
 const { getPaymentLimits } = require("../utils/paymentLimits");
+const crypto = require('crypto');
+
+// Permanent error codes that should NOT be retried
+const PERMANENT_FAIL_CODES = ['TX_FAILED', 'MISSING_MEMO', 'INVALID_DESTINATION', 'UNSUPPORTED_ASSET', 'AMOUNT_TOO_LOW', 'AMOUNT_TOO_HIGH', 'UNDERPAID'];
 const {
   convertToLocalCurrency,
   enrichPaymentWithConversion,
@@ -403,6 +409,18 @@ async function verifyPayment(req, res, next) {
         req.school.stellarAddress,
       );
     } catch (stellarErr) {
+      // Handle stale data errors specifically
+      if (stellarErr instanceof StaleDataError) {
+        logger.warn('Stale data prevented', {
+          transactionHash: txHash,
+          schoolId,
+          error: stellarErr.message,
+          details: stellarErr.details
+        });
+        return next(stellarErr);
+      }
+
+      // Record a failed payment entry for known failure codes so we have an audit trail
       if (PERMANENT_FAIL_CODES.includes(stellarErr.code)) {
         await Payment.create({
           schoolId,
@@ -519,14 +537,27 @@ async function verifyPayment(req, res, next) {
       },
     });
   } catch (err) {
+    // Handle stale data errors specifically
+    if (err instanceof StaleDataError) {
+      logger.warn('Stale data prevented in payment verification', {
+        transactionHash: req.body.txHash,
+        schoolId: req.schoolId,
+        error: err.message,
+        details: err.details
+      });
+      return next(err);
+    }
+
+    if (PERMANENT_FAIL_CODES.includes(err.code)) {
+      return next(err);
+    }
+
     next(err);
   }
 }
 async function verifyTransactionHash(req, res, next) {
   try {
     const { txHash } = req.params;
-
-    const tx = await server.transactions().transaction(txHash).call();
 
     res.json({
       hash: tx.hash,
