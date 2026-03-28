@@ -59,6 +59,9 @@ async function registerStudent(req, res, next) {
     }
     res.status(201).json(response);
   } catch (err) {
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+    }
     if (err.code === 11000) {
       const e = new Error('Student ID already exists in this school');
       e.code = 'DUPLICATE_STUDENT';
@@ -126,6 +129,9 @@ async function updateStudent(req, res, next) {
     del(KEYS.student(studentId));
     res.json(student);
   } catch (err) {
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+    }
     next(err);
   }
 }

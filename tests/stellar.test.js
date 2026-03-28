@@ -2,7 +2,7 @@
 
 // Must set required env vars before any module that loads config/index.js
 process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-process.env.SCHOOL_WALLET_ADDRESS = 'GTEST123';
+process.env.SCHOOL_WALLET_ADDRESS = 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B';
 
 const {
   verifyTransaction,
@@ -19,7 +19,7 @@ const {
 const mockOperations = jest.fn();
 
 jest.mock('../backend/src/config/stellarConfig', () => ({
-  SCHOOL_WALLET: 'GTEST123',
+  SCHOOL_WALLET: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B',
   CONFIRMATION_THRESHOLD: 2,
   ACCEPTED_ASSETS: {
     XLM:  { code: 'XLM',  type: 'native',          issuer: null },
@@ -140,12 +140,12 @@ describe('normalizeAmount', () => {
 
 describe('extractValidPayment', () => {
   const validOps = async () => ({
-    records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'native' }],
+    records: [{ type: 'payment', to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B', amount: '100.0', asset_type: 'native' }],
   });
 
   test('returns payOp, memo, asset for a valid transaction', async () => {
     const tx = { successful: true, memo: 'STU001', operations: validOps };
-    const result = await extractValidPayment(tx, 'GTEST123');
+    const result = await extractValidPayment(tx, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B');
     expect(result).not.toBeNull();
     expect(result.memo).toBe('STU001');
     expect(result.asset.assetCode).toBe('XLM');
@@ -153,17 +153,17 @@ describe('extractValidPayment', () => {
 
   test('returns null for a failed transaction', async () => {
     const tx = { successful: false, memo: 'STU001', operations: validOps };
-    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
+    expect(await extractValidPayment(tx, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).toBeNull();
   });
 
   test('returns null when memo is missing', async () => {
     const tx = { successful: true, memo: undefined, operations: validOps };
-    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
+    expect(await extractValidPayment(tx, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).toBeNull();
   });
 
   test('returns null when memo is empty string', async () => {
     const tx = { successful: true, memo: '   ', operations: validOps };
-    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
+    expect(await extractValidPayment(tx, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).toBeNull();
   });
 
   test('returns null when no payment op to school wallet', async () => {
@@ -172,7 +172,7 @@ describe('extractValidPayment', () => {
       memo: 'STU001',
       operations: async () => ({ records: [{ type: 'payment', to: 'GOTHER', amount: '100.0', asset_type: 'native' }] }),
     };
-    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
+    expect(await extractValidPayment(tx, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).toBeNull();
   });
 
   test('returns null for unsupported asset', async () => {
@@ -180,10 +180,10 @@ describe('extractValidPayment', () => {
       successful: true,
       memo: 'STU001',
       operations: async () => ({
-        records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'credit_alphanum4', asset_code: 'SHIB', asset_issuer: 'GRANDOM' }],
+        records: [{ type: 'payment', to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B', amount: '100.0', asset_type: 'credit_alphanum4', asset_code: 'SHIB', asset_issuer: 'GRANDOM' }],
       }),
     };
-    expect(await extractValidPayment(tx, 'GTEST123')).toBeNull();
+    expect(await extractValidPayment(tx, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).toBeNull();
   });
 });
 
@@ -196,38 +196,38 @@ describe('verifyTransaction', () => {
 
   test('returns payment details with asset info for a valid XLM transaction', async () => {
     mockOperations.mockResolvedValue({
-      records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'native' }],
+      records: [{ type: 'payment', to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B', amount: '100.0', asset_type: 'native' }],
     });
-    const result = await verifyTransaction('abc123', 'GTEST123');
+    const result = await verifyTransaction('abc123', 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B');
     expect(result).toMatchObject({ hash: 'abc123', memo: 'STU001', amount: 100, assetCode: 'XLM', assetType: 'native' });
     expect(result.feeValidation.status).toBe('valid');
   });
 
   test('throws INVALID_DESTINATION when no matching payment op', async () => {
     mockOperations.mockResolvedValue({ records: [] });
-    await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'INVALID_DESTINATION' });
+    await expect(verifyTransaction('abc123', 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).rejects.toMatchObject({ code: 'INVALID_DESTINATION' });
   });
 
   test('throws INVALID_DESTINATION when payment is to a different wallet', async () => {
     mockOperations.mockResolvedValue({
       records: [{ type: 'payment', to: 'GOTHER999', amount: '100.0', asset_type: 'native' }],
     });
-    await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'INVALID_DESTINATION' });
+    await expect(verifyTransaction('abc123', 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).rejects.toMatchObject({ code: 'INVALID_DESTINATION' });
   });
 
   test('throws UNSUPPORTED_ASSET for unsupported asset', async () => {
     mockOperations.mockResolvedValue({
-      records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'credit_alphanum4', asset_code: 'SHIB', asset_issuer: 'GRANDOM' }],
+      records: [{ type: 'payment', to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B', amount: '100.0', asset_type: 'credit_alphanum4', asset_code: 'SHIB', asset_issuer: 'GRANDOM' }],
     });
-    await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'UNSUPPORTED_ASSET' });
+    await expect(verifyTransaction('abc123', 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B')).rejects.toMatchObject({ code: 'UNSUPPORTED_ASSET' });
   });
 
   test('feeValidation status is unknown when student not found', async () => {
     Student.findOne.mockResolvedValue(null);
     mockOperations.mockResolvedValue({
-      records: [{ type: 'payment', to: 'GTEST123', amount: '100.0', asset_type: 'native' }],
+      records: [{ type: 'payment', to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B', amount: '100.0', asset_type: 'native' }],
     });
-    const result = await verifyTransaction('abc123', 'GTEST123');
+    const result = await verifyTransaction('abc123', 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B');
     expect(result.feeValidation.status).toBe('unknown');
   });
 });
@@ -240,17 +240,17 @@ describe('parseIncomingTransaction', () => {
 
     mockOperations.mockResolvedValue({
       records: [
-        { type: 'payment', from: 'GFROM', to: 'GTEST123', amount: '150.0', asset_type: 'native' },
+        { type: 'payment', from: 'GFROM', to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B', amount: '150.0', asset_type: 'native' },
         { type: 'payment', from: 'GFROM', to: 'GOTHER', amount: '50.0', asset_type: 'native' },
       ],
     });
 
-    const parsed = await parseIncomingTransaction(txHash, 'GTEST123');
+    const parsed = await parseIncomingTransaction(txHash, 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B');
     expect(parsed.memo).toBe('STU001');
     expect(parsed.payments).toHaveLength(1);
     expect(parsed.payments[0]).toMatchObject({
       from: 'GFROM',
-      to: 'GTEST123',
+      to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B',
       amount: 150.0,
       assetCode: 'XLM',
       assetType: 'native',
@@ -271,7 +271,7 @@ function makeSyncTx(amount, memo = 'STU001') {
     operations: jest.fn().mockResolvedValue({
       records: [{
         type: 'payment',
-        to: 'GTEST123',
+        to: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B',
         from: 'GSENDER',
         amount: String(amount),
         asset_type: 'native',
@@ -283,7 +283,7 @@ function makeSyncTx(amount, memo = 'STU001') {
 const stellarConfig = require('../backend/src/config/stellarConfig');
 
 describe('syncPaymentsForSchool', () => {
-  const school = { schoolId: 'SCH001', stellarAddress: 'GTEST123' };
+  const school = { schoolId: 'SCH001', stellarAddress: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B' };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -296,7 +296,7 @@ describe('syncPaymentsForSchool', () => {
   });
 
   test('stops pagination when a known txHash is encountered', async () => {
-    const school = { schoolId: 'SCH001', stellarAddress: 'GTEST123' };
+    const school = { schoolId: 'SCH001', stellarAddress: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B' };
 
     // 200 new records on page 1 (full page → triggers next())
     const page1Records = Array.from({ length: 200 }, (_, i) => ({
