@@ -401,12 +401,21 @@ async function verifyTransactionHash(req, res, next) {
   }
 }
 
+const _syncLocks = new Set();
+
 async function syncAllPayments(req, res, next) {
+  const schoolId = req.schoolId;
+  if (_syncLocks.has(schoolId)) {
+    return res.status(409).json({ error: "Sync already in progress", code: "SYNC_IN_PROGRESS" });
+  }
+  _syncLocks.add(schoolId);
   try {
     await syncPaymentsForSchool(req.school);
     res.json({ message: "Sync complete" });
   } catch (err) {
     next(wrapStellarError(err));
+  } finally {
+    _syncLocks.delete(schoolId);
   }
 }
 
