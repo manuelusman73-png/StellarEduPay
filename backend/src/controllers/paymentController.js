@@ -103,7 +103,8 @@ async function getPaymentInstructions(req, res, next) {
             rateTimestamp: feeConversion.rateTimestamp,
           }
         : null,
-      note: "Include the payment intent memo exactly when sending payment.",
+      note: "Include the payment intent memo exactly when sending payment. The memo must be sent as a text memo (MEMO_TEXT). Other memo types (MEMO_ID, MEMO_HASH, MEMO_RETURN) will not be recognised and your payment will not be matched.",
+      memoType: "text",
     });
   } catch (err) {
     next(err);

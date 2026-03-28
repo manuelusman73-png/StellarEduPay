@@ -34,6 +34,10 @@ function normalizeAmount(rawAmount) {
 async function extractValidPayment(tx, walletAddress) {
   if (!tx.successful) return null;
 
+  // Only process MEMO_TEXT — MEMO_ID, MEMO_HASH, MEMO_RETURN produce
+  // non-string values that cannot be matched to a student ID.
+  if (tx.memo_type !== 'text') return null;
+
   const memo = tx.memo ? tx.memo.trim() : null;
   if (!memo) return null;
 
