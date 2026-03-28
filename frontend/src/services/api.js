@@ -8,7 +8,7 @@ const api = axios.create({
   timeout: TIMEOUT_MS,
 });
 
-export const getStudent = (studentId) => api.get(`/students/${studentId}`);
+export const getStudents = (page = 1, limit = 50) => api.get('/students', { params: { page, limit } });
 export const getPaymentInstructions = (studentId) => api.get(`/payments/instructions/${studentId}`);
 export const getStudentPayments = (studentId) => api.get(`/payments/${studentId}`);
 export const verifyPayment = (txHash) => api.post('/payments/verify', { txHash });

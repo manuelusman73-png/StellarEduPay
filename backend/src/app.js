@@ -104,7 +104,9 @@ mongoose.connect(config.MONGO_URI)
 
 // ── Server ────────────────────────────────────────────────────────────────────
 const PORT = config.PORT;
-const server = app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
+const server = require.main === module
+  ? app.listen(PORT, () => logger.info(`Server running on port ${PORT}`))
+  : { close: (cb) => cb && cb() };
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown(signal) {

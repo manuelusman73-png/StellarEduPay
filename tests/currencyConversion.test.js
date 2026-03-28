@@ -78,9 +78,9 @@ async function test(name, fn) {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
+it('currencyConversionService suite', async () => {
 (async () => {
   console.log('\nCurrencyConversionService\n');
-
   // Fresh require so cache starts empty
   delete require.cache[require.resolve('../backend/src/services/currencyConversionService')];
   const svc = require('../backend/src/services/currencyConversionService');
@@ -308,3 +308,4 @@ async function test(name, fn) {
   console.log(`\n${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exit(1);
 })();
+}, 30000);

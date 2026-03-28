@@ -7,6 +7,7 @@ const {
   registerStudent,
   getAllStudents,
   getStudent,
+  updateStudent,
   getPaymentSummary,
   bulkImportStudents,
   getOverdueStudents,
@@ -27,6 +28,7 @@ router.get('/',           requireAdminAuth, getAllStudents);
 // Public routes
 router.get('/summary',    getPaymentSummary);
 router.get('/overdue',    getOverdueStudents);
-router.get('/:studentId', validateStudentIdParam,  getStudent);
+router.get('/:studentId', validateStudentIdParam, getStudent);
+router.put('/:studentId', requireAdminAuth, validateStudentIdParam, updateStudent);
 
 module.exports = router;

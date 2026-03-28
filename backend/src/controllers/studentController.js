@@ -71,13 +71,44 @@ async function registerStudent(req, res, next) {
 
 async function getAllStudents(req, res, next) {
   try {
-    const cacheKey = KEYS.studentsAll();
-    const cached = get(cacheKey);
-    if (cached !== undefined) return res.json(cached);
+    const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
+    const skip  = (page - 1) * limit;
 
-    const students = await Student.find({ schoolId: req.schoolId }).sort({ createdAt: -1 });
-    set(cacheKey, students, TTL.STUDENTS);
-    res.json(students);
+    const [students, total] = await Promise.all([
+      Student.find({ schoolId: req.schoolId }).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Student.countDocuments({ schoolId: req.schoolId }),
+    ]);
+
+    res.json({ students, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateStudent(req, res, next) {
+  try {
+    const { studentId } = req.params;
+    const { name, class: className, feeAmount } = req.body;
+
+    const update = {};
+    if (name      !== undefined) update.name      = name;
+    if (className !== undefined) update.class     = className;
+    if (feeAmount !== undefined) update.feeAmount = feeAmount;
+
+    const student = await Student.findOneAndUpdate(
+      { schoolId: req.schoolId, studentId },
+      update,
+      { new: true, runValidators: true },
+    );
+    if (!student) {
+      const err = new Error('Student not found');
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
+
+    del(KEYS.student(studentId));
+    res.json(student);
   } catch (err) {
     next(err);
   }
@@ -274,4 +305,4 @@ async function getOverdueStudents(req, res, next) {
   }
 }
 
-module.exports = { registerStudent, getAllStudents, getStudent, getPaymentSummary, bulkImportStudents, getOverdueStudents };
+module.exports = { registerStudent, getAllStudents, getStudent, updateStudent, getPaymentSummary, bulkImportStudents, getOverdueStudents };

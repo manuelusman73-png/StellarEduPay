@@ -36,20 +36,24 @@ const {
   validateTxHashParam,
   validateCreatePaymentIntent,
   validateVerifyPayment,
+  validateSubmitTransaction,
 } = require('../middleware/validate');
-const { resolveSchool }   = require('../middleware/schoolContext');
-const idempotency         = require('../middleware/idempotency');
+const { resolveSchool }    = require('../middleware/schoolContext');
+const idempotency          = require('../middleware/idempotency');
 const { requireAdminAuth } = require('../middleware/auth');
-const { strictLimiter }   = require('../middleware/rateLimiter');
+const { strictLimiter }    = require('../middleware/rateLimiter');
 
-// Does not require school context
+// No school context required
 router.get('/verify/:txHash', validateTxHashParam, verifyTransactionHash);
 
-// All routes below require school context
+// Validation runs BEFORE resolveSchool so missing-school requests still get
+// proper 400 validation errors when the body itself is invalid.
+router.post('/intent', validateCreatePaymentIntent, idempotency, resolveSchool, createPaymentIntent);
+router.post('/submit', validateSubmitTransaction, resolveSchool, submitTransaction);
+
+// All remaining routes require school context
 router.use(resolveSchool);
 
-// ── Static routes (before parameterized ones) ────────────────────────────────
-// ── Static routes (before parameterised ones) ────────────────────────────────
 router.get('/',                              getAllPayments);
 router.get('/accepted-assets',               getAcceptedAssets);
 router.get('/limits',                        getPaymentLimitsEndpoint);
@@ -60,37 +64,20 @@ router.get('/suspicious',                    getSuspiciousPayments);
 router.get('/pending',                       getPendingPayments);
 router.get('/retry-queue',                   getRetryQueue);
 router.get('/rates',                         getExchangeRates);
-
-// ── Collection routes ────────────────────────────────────────────────────────
-router.get('/',                              getAllPayments);
-
-// ── Dead Letter Queue endpoints ──────────────────────────────────────────────
 router.get('/dlq',                           getDeadLetterJobs);
-router.post('/dlq/:id/retry',                retryDeadLetterJob);
 
-// ── POST routes (mutating operations) ────────────────────────────────────────
-router.post('/intent',                       idempotency, validateCreatePaymentIntent, createPaymentIntent);
-router.post('/verify',                       strictLimiter, idempotency, validateVerifyPayment, verifyPayment);
-router.post('/sync',                         strictLimiter, requireAdminAuth, syncAllPayments);
-router.post('/finalize',                     requireAdminAuth, finalizePayments);
+router.post('/verify',    strictLimiter, idempotency, validateVerifyPayment, verifyPayment);
+router.post('/sync',      strictLimiter, requireAdminAuth, syncAllPayments);
+router.post('/finalize',  requireAdminAuth, finalizePayments);
+router.post('/dlq/:id/retry', retryDeadLetterJob);
 
-// ── POST routes ───────────────────────────────────────────────────────────────
-router.post('/intent',                 idempotency, validateCreatePaymentIntent, createPaymentIntent);
-router.post('/submit',                 submitTransaction);
-router.post('/verify',                 strictLimiter, idempotency, validateVerifyPayment, verifyPayment);
-router.post('/sync',                   strictLimiter, requireAdminAuth, syncAllPayments);
-router.post('/finalize',               requireAdminAuth, finalizePayments);
-router.post('/dlq/:id/retry',          retryDeadLetterJob);
-
-// ── Parameterised GET routes ──────────────────────────────────────────────────
 router.get('/balance/:studentId',      validateStudentIdParam, getStudentBalance);
 router.get('/instructions/:studentId', validateStudentIdParam, getPaymentInstructions);
 router.get('/receipt/:txHash',         generateReceipt);
 router.get('/queue/:txHash',           getQueueJobStatus);
 router.get('/:studentId',              validateStudentIdParam, getStudentPayments);
 
-// ── Payment locking ───────────────────────────────────────────────────────────
-router.post('/:paymentId/lock',        lockPaymentForUpdate);
-router.post('/:paymentId/unlock',      unlockPayment);
+router.post('/:paymentId/lock',   lockPaymentForUpdate);
+router.post('/:paymentId/unlock', unlockPayment);
 
 module.exports = router;

@@ -11,7 +11,7 @@ router.use(resolveSchool);
 
 router.post('/',              validateFeeStructure, createFeeStructure);
 router.get('/',               getAllFeeStructures);
-router.get('/:feeId',         getFeeByClass);
-router.delete('/:feeId',      deleteFeeStructure);
+router.get('/:className',         getFeeByClass);
+router.delete('/:className',      deleteFeeStructure);
 
 module.exports = router;

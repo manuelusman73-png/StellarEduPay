@@ -54,6 +54,7 @@ jest.mock('../backend/src/config/stellarConfig', () => ({
 jest.mock('../backend/src/models/paymentModel', () => ({
   findOne: jest.fn(),
   create: jest.fn().mockResolvedValue({}),
+  exists: jest.fn().mockResolvedValue(false),
 }));
 
 jest.mock('../backend/src/models/paymentIntentModel', () => ({
@@ -220,7 +221,6 @@ describe('verifyTransaction', () => {
     });
     await expect(verifyTransaction('abc123', 'GTEST123')).rejects.toMatchObject({ code: 'UNSUPPORTED_ASSET' });
   });
-});
 
   test('feeValidation status is unknown when student not found', async () => {
     Student.findOne.mockResolvedValue(null);
@@ -260,9 +260,104 @@ describe('parseIncomingTransaction', () => {
 
 // ─── syncPayments ─────────────────────────────────────────────────────────────
 
+// Shared mock transaction factory for sync tests
+function makeSyncTx(amount, memo = 'STU001') {
+  return {
+    hash: `tx-${amount}`,
+    successful: true,
+    memo,
+    created_at: new Date().toISOString(),
+    ledger_attr: 90, // below CONFIRMATION_THRESHOLD of 2 from sequence 100 → confirmed
+    operations: jest.fn().mockResolvedValue({
+      records: [{
+        type: 'payment',
+        to: 'GTEST123',
+        from: 'GSENDER',
+        amount: String(amount),
+        asset_type: 'native',
+      }],
+    }),
+  };
+}
+
+const stellarConfig = require('../backend/src/config/stellarConfig');
+
 describe('syncPaymentsForSchool', () => {
+  const school = { schoolId: 'SCH001', stellarAddress: 'GTEST123' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Payment.findOne.mockResolvedValue(null); // tx not yet recorded
+    Payment.exists.mockResolvedValue(false);
+  });
+
   test('resolves without error when no transactions exist', async () => {
-    const school = { schoolId: 'SCH001', stellarAddress: 'GTEST123' };
     await expect(syncPaymentsForSchool(school)).resolves.toBeUndefined();
+  });
+
+  test('underpayment does not mark student as paid', async () => {
+    // Student fee is 250, payment is only 1 — underpayment
+    const PaymentIntent = require('../backend/src/models/paymentIntentModel');
+    PaymentIntent.findOne.mockResolvedValue({ _id: 'intent1', studentId: 'STU001', amount: 250, memo: 'STU001', status: 'pending' });
+    Student.findOne.mockResolvedValue({ schoolId: 'SCH001', studentId: 'STU001', feeAmount: 250 });
+
+    stellarConfig.server.transactions = () => ({
+      forAccount: () => ({
+        order: () => ({ limit: () => ({ call: async () => ({ records: [makeSyncTx(1)] }) }) }),
+      }),
+    });
+
+    await syncPaymentsForSchool(school);
+
+    // Payment recorded with underpaid status and FAILED
+    expect(Payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ feeValidationStatus: 'underpaid', status: 'FAILED' }),
+    );
+    // Student feePaid must NOT be updated
+    expect(Student.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('exact payment marks student as paid', async () => {
+    const PaymentIntent = require('../backend/src/models/paymentIntentModel');
+    PaymentIntent.findOne.mockResolvedValue({ _id: 'intent1', studentId: 'STU001', amount: 250, memo: 'STU001', status: 'pending' });
+    Student.findOne.mockResolvedValue({ schoolId: 'SCH001', studentId: 'STU001', feeAmount: 250 });
+
+    stellarConfig.server.transactions = () => ({
+      forAccount: () => ({
+        order: () => ({ limit: () => ({ call: async () => ({ records: [makeSyncTx(250)] }) }) }),
+      }),
+    });
+
+    await syncPaymentsForSchool(school);
+
+    expect(Payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ feeValidationStatus: 'valid', status: 'SUCCESS' }),
+    );
+    expect(Student.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ studentId: 'STU001' }),
+      { feePaid: true },
+    );
+  });
+
+  test('overpayment marks student as paid', async () => {
+    const PaymentIntent = require('../backend/src/models/paymentIntentModel');
+    PaymentIntent.findOne.mockResolvedValue({ _id: 'intent1', studentId: 'STU001', amount: 250, memo: 'STU001', status: 'pending' });
+    Student.findOne.mockResolvedValue({ schoolId: 'SCH001', studentId: 'STU001', feeAmount: 250 });
+
+    stellarConfig.server.transactions = () => ({
+      forAccount: () => ({
+        order: () => ({ limit: () => ({ call: async () => ({ records: [makeSyncTx(300)] }) }) }),
+      }),
+    });
+
+    await syncPaymentsForSchool(school);
+
+    expect(Payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ feeValidationStatus: 'overpaid', status: 'SUCCESS' }),
+    );
+    expect(Student.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ studentId: 'STU001' }),
+      { feePaid: true },
+    );
   });
 });
