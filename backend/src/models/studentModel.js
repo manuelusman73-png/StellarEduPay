@@ -6,7 +6,7 @@ const softDelete = require('../utils/softDelete');
 const studentSchema = new mongoose.Schema(
   {
     schoolId:           { type: String, required: true, index: true },
-    studentId:          { type: String, required: true, index: true },
+    studentId:          { type: String, required: true, index: true, maxlength: [28, 'studentId must not exceed 28 characters (Stellar memo limit)'] },
     name:               { type: String, required: true },
     class:              { type: String, required: true, index: true },
     academicYear:       { type: String },

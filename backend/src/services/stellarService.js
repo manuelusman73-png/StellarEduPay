@@ -181,38 +181,35 @@ async function detectAbnormalPatterns(
  * data must include schoolId.
  */
 async function recordPayment(data) {
-  const exists = await Payment.findOne({
-    transactionHash: data.transactionHash,
-  });
-  if (exists) {
-    const err = new Error(
-      `Transaction ${data.transactionHash} has already been processed`,
-    );
-    err.code = "DUPLICATE_TX";
-    throw err;
+  const dedupeKey = data.txHash || data.transactionHash;
+  if (!dedupeKey) {
+    throw Object.assign(new Error("Payment data missing txHash"), { code: "VALIDATION_ERROR" });
   }
   if (!data.referenceCode) {
     data = { ...data, referenceCode: await generateReferenceCode() };
   }
   try {
-    return await Payment.create(data);
-  } catch (e) {
-    if (e.code === 11000) {
-      const err = new Error(
-        `Transaction ${data.transactionHash} has already been processed`,
-      );
+    const existing = await Payment.findOneAndUpdate(
+      { txHash: dedupeKey },
+      { $setOnInsert: data },
+      { upsert: true, new: false },
+    );
+    if (existing !== null) {
+      const err = new Error(`Transaction ${dedupeKey} has already been processed`);
       err.code = "DUPLICATE_TX";
-      logger.warn("Duplicate transaction rejected", {
-        txHash: data.transactionHash,
-        schoolId: data.schoolId,
-      });
+      logger.warn("Duplicate transaction rejected", { txHash: dedupeKey, schoolId: data.schoolId });
       throw err;
     }
-    logger.error("Failed to record payment", {
-      error: e.message,
-      txHash: data.transactionHash,
-      schoolId: data.schoolId,
-    });
+    return await Payment.findOne({ txHash: dedupeKey });
+  } catch (e) {
+    if (e.code === "DUPLICATE_TX") throw e;
+    if (e.code === 11000) {
+      const err = new Error(`Transaction ${dedupeKey} has already been processed`);
+      err.code = "DUPLICATE_TX";
+      logger.warn("Duplicate transaction rejected (11000)", { txHash: dedupeKey, schoolId: data.schoolId });
+      throw err;
+    }
+    logger.error("Failed to record payment", { error: e.message, txHash: dedupeKey, schoolId: data.schoolId });
     throw e;
   }
 }
@@ -429,44 +426,57 @@ async function syncPaymentsForSchool(school) {
           paid: paymentAmount,
           required: intent.amount,
         });
-        await Payment.create({
-          schoolId,
-          studentId: intent.studentId,
-          txHash: tx.hash,
-          amount: paymentAmount,
-          feeAmount: intent.amount,
-          feeValidationStatus: "underpaid",
-          excessAmount: 0,
-          status: "FAILED",
-          memo,
-          senderAddress,
-          isSuspicious: true,
-          suspicionReason: feeValidation.message,
-          ledger: txLedger,
-          confirmationStatus: "failed",
-          confirmedAt: txDate,
-        });
-        newPayments++;
+        const underpaidResult = await Payment.findOneAndUpdate(
+          { txHash: tx.hash },
+          {
+            $setOnInsert: {
+              schoolId,
+              studentId: intent.studentId,
+              txHash: tx.hash,
+              amount: paymentAmount,
+              feeAmount: intent.amount,
+              feeValidationStatus: "underpaid",
+              excessAmount: 0,
+              status: "FAILED",
+              memo,
+              senderAddress,
+              isSuspicious: true,
+              suspicionReason: feeValidation.message,
+              ledger: txLedger,
+              confirmationStatus: "failed",
+              confirmedAt: txDate,
+            },
+          },
+          { upsert: true, new: false },
+        );
+        if (underpaidResult === null) newPayments++; // null means doc was inserted
         continue;
       }
 
-      await Payment.create({
-        schoolId,
-        studentId: intent.studentId,
-        txHash: tx.hash,
-        amount: paymentAmount,
-        feeAmount: intent.amount,
-        feeValidationStatus: cumulativeStatus,
-        excessAmount,
-        status: "confirmed",
-        memo,
-        senderAddress,
-        isSuspicious: collision.suspicious,
-        suspicionReason: collision.reason,
-        ledger: txLedger,
-        confirmationStatus,
-        confirmedAt: txDate,
-      });
+      const insertResult = await Payment.findOneAndUpdate(
+        { txHash: tx.hash },
+        {
+          $setOnInsert: {
+            schoolId,
+            studentId: intent.studentId,
+            txHash: tx.hash,
+            amount: paymentAmount,
+            feeAmount: intent.amount,
+            feeValidationStatus: cumulativeStatus,
+            excessAmount,
+            status: "confirmed",
+            memo,
+            senderAddress,
+            isSuspicious: collision.suspicious,
+            suspicionReason: collision.reason,
+            ledger: txLedger,
+            confirmationStatus,
+            confirmedAt: txDate,
+          },
+        },
+        { upsert: true, new: false },
+      );
+      if (insertResult !== null) continue; // already existed, skip side-effects
       newPayments++;
 
       logger.info("Transaction recorded", {

@@ -12,7 +12,7 @@ export default function Home() {
       <h1>StellarEduPay</h1>
       <p>Transparent school fee payments on the Stellar blockchain.</p>
       <Link href="/pay-fees">
-        <button style={{ padding: '0.75rem 2rem', fontSize: '1rem', cursor: 'pointer' }}>
+        <button className="btn-primary">
           Pay School Fees
         </button>
       </Link>

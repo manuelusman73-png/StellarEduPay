@@ -139,7 +139,7 @@ X-School-ID: SCH-3F2A
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `studentId` | string | Yes | 3–20 alphanumeric, hyphens, underscores |
+| `studentId` | string | Yes | 3–20 alphanumeric, hyphens, underscores. **Max 28 characters** — Stellar's text memo field is limited to 28 bytes; IDs longer than 28 characters are rejected with `400 VALIDATION_ERROR`. |
 | `name` | string | Yes | |
 | `class` | string | Yes | Must match an active fee structure |
 | `feeAmount` | number | No | Auto-assigned from fee structure if omitted |

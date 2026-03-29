@@ -49,11 +49,11 @@ export default function PaymentForm() {
     : null;
 
   return (
-    <div style={{ maxWidth: 480, margin: '2rem auto', fontFamily: 'sans-serif' }}>
+    <div className="container-sm">
       <h2>Pay School Fees</h2>
 
       <form onSubmit={handleSubmit}>
-        <label htmlFor="studentIdInput" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+        <label htmlFor="studentIdInput" className="input-label">
           Student ID
         </label>
         <input
@@ -65,9 +65,9 @@ export default function PaymentForm() {
           required
           aria-required="true"
           aria-describedby={error ? 'errorMessage' : undefined}
-          style={{ width: '100%', padding: '0.5rem', marginBottom: '0.5rem', boxSizing: 'border-box' }}
+          className="input-field mb-0-5"
         />
-        <button type="submit" disabled={loading} style={{ padding: '0.5rem 1rem' }}>
+        <button type="submit" disabled={loading} className="btn-primary">
           {loading ? 'Loading...' : 'Get Payment Instructions'}
         </button>
       </form>
@@ -77,7 +77,7 @@ export default function PaymentForm() {
           id="errorMessage"
           ref={errorRef}
           role="alert"
-          style={{ color: 'red', marginTop: '0.5rem' }}
+          className="alert-error"
           tabIndex="-1"
         >
           {error}
@@ -85,28 +85,26 @@ export default function PaymentForm() {
       )}
 
       {student && instructions && (
-        <div style={{ marginTop: '1.5rem', background: '#f5f5f5', padding: '1rem', borderRadius: 8 }}>
+        <div className="card">
           <p><strong>Student:</strong> {student.name} — Class {student.class}</p>
 
-          {/* Fee amount with local currency equivalent */}
-          <p style={{ margin: '0.4rem 0' }}>
+          <p className="my-0-4">
             <strong>Required Fee:</strong>{' '}
             {instructions.feeAmount != null ? `${instructions.feeAmount} XLM` : `${student.feeAmount} XLM`}
             {local && (
-              <span style={{ marginLeft: '0.5rem', color: '#2e7d32', fontWeight: 500 }}>
+              <span className="ml-0-5 text-success">
                 ≈ {local.amount.toFixed(2)} {local.currency}
               </span>
             )}
           </p>
 
-          {/* Rate freshness note */}
           {local && rateTime && (
-            <p style={{ margin: '0 0 0.4rem', fontSize: '0.75rem', color: '#999' }}>
+            <p className="mb-0-5 text-muted">
               Rate as of {rateTime} · 1 XLM = {local.rate.toFixed(4)} {local.currency}
             </p>
           )}
           {!local && instructions.feeAmount != null && (
-            <p style={{ margin: '0 0 0.4rem', fontSize: '0.75rem', color: '#bbb' }}>
+            <p className="mb-0-5 text-muted">
               Local currency rate unavailable
             </p>
           )}
@@ -114,21 +112,14 @@ export default function PaymentForm() {
           <p><strong>Status:</strong> {student.feePaid ? '✅ Paid' : '❌ Unpaid'}</p>
           <hr />
 
-          <div style={{ marginBottom: '1rem' }}>
-            <label htmlFor="walletAddress" style={{ display: 'block', fontWeight: 500, marginBottom: '0.25rem' }}>
+          <div className="mb-1">
+            <label htmlFor="walletAddress" className="input-label mb-0-25">
               Send payment to:
             </label>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+            <div className="flex-row">
               <code 
                 id="walletAddress"
-                style={{ 
-                  wordBreak: 'break-all', 
-                  flex: 1, 
-                  padding: '0.5rem', 
-                  background: 'white', 
-                  borderRadius: 4,
-                  border: '1px solid #ddd'
-                }}
+                className="code-block"
               >
                 {instructions.walletAddress}
               </code>
@@ -137,36 +128,21 @@ export default function PaymentForm() {
                 onClick={() => handleCopy(instructions.walletAddress, 'wallet')}
                 aria-label="Copy wallet address"
                 title="Copy wallet address"
-                style={{
-                  padding: '0.5rem 0.75rem',
-                  background: '#2196F3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  whiteSpace: 'nowrap'
-                }}
+                className="btn-copy"
               >
                 {copiedField === 'wallet' ? '✓ Copied!' : 'Copy'}
               </button>
             </div>
           </div>
 
-          <div style={{ marginBottom: '1rem' }}>
-            <label htmlFor="memoField" style={{ display: 'block', fontWeight: 500, marginBottom: '0.25rem' }}>
+          <div className="mb-1">
+            <label htmlFor="memoField" className="input-label mb-0-25">
               Memo (required):
             </label>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+            <div className="flex-row">
               <code 
                 id="memoField"
-                style={{ 
-                  flex: 1, 
-                  padding: '0.5rem', 
-                  background: 'white', 
-                  borderRadius: 4,
-                  border: '1px solid #ddd'
-                }}
+                className="code-block"
               >
                 {instructions.memo}
               </code>
@@ -175,16 +151,7 @@ export default function PaymentForm() {
                 onClick={() => handleCopy(instructions.memo, 'memo')}
                 aria-label="Copy memo"
                 title="Copy memo"
-                style={{
-                  padding: '0.5rem 0.75rem',
-                  background: '#2196F3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  whiteSpace: 'nowrap'
-                }}
+                className="btn-copy"
               >
                 {copiedField === 'memo' ? '✓ Copied!' : 'Copy'}
               </button>
@@ -192,9 +159,9 @@ export default function PaymentForm() {
           </div>
 
           {instructions.acceptedAssets?.length > 0 && (
-            <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: '#e8f5e9', borderRadius: 4 }}>
+            <div className="badge-success">
               <strong>Accepted Assets:</strong>
-              <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
+              <ul className="list-unstyled">
                 {instructions.acceptedAssets.map(a => (
                   <li key={a.code}>{a.displayName} ({a.code})</li>
                 ))}
@@ -202,17 +169,17 @@ export default function PaymentForm() {
             </div>
           )}
 
-          <p style={{ fontSize: '0.85rem', color: '#555', marginTop: '0.75rem' }}>
+          <p className="text-muted mt-1">
             {instructions.note}
           </p>
         </div>
       )}
 
       {payments !== null && (
-        <div style={{ marginTop: '1.5rem' }}>
-          <h3 style={{ marginBottom: '0.75rem' }}>Payment History</h3>
+        <div className="mt-1-5">
+          <h3 className="mb-0-75">Payment History</h3>
           {payments.length === 0 ? (
-            <p style={{ color: '#888', fontStyle: 'italic' }}>No payments recorded yet.</p>
+            <p className="text-muted italic">No payments recorded yet.</p>
           ) : (
             payments.map(p => (
               <TransactionCard key={p.txHash || p._id} payment={p} />

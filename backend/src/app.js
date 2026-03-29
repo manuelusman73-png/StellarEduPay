@@ -27,8 +27,11 @@ const { runConsistencyCheck }                                         = require(
 const { healthCheck }                                                 = require('./controllers/healthController');
 const logger                                                          = require('./utils/logger');
 
+const morgan = require('morgan');
+
 const app = express();
 
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
