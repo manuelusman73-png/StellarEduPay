@@ -54,7 +54,14 @@ export default function Dashboard() {
     setSummaryLoading(true);
     getPaymentSummary()
       .then(({ data }) => setSummary(data))
-      .catch(() => {})
+      .catch(() => { })
+      .finally(() => setSummaryLoading(false));
+  }, []);
+
+  useEffect(() => {
+    getPaymentSummary()
+      .then(({ data }) => setSummary(data))
+      .catch(() => { })
       .finally(() => setSummaryLoading(false));
   }, []);
 
@@ -83,7 +90,7 @@ export default function Dashboard() {
     setTimeout(() => setSyncMessage(null), 3000);
     getPaymentSummary()
       .then(({ data: s }) => setSummary(s))
-      .catch(() => {});
+      .catch(() => { });
   }
 
   function handleRetry() {
@@ -114,6 +121,16 @@ export default function Dashboard() {
     },
   ];
 
+  // Build category cards from summary data
+  const categoryCards = summary?.categoryBreakdown
+    ? summary.categoryBreakdown.map(cat => ({
+      label: cat.category,
+      value: `${cat.totalCollected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 7 })} XLM`,
+      count: cat.paymentCount,
+      cls: "category",
+    }))
+    : [];
+
   return (
     <>
       <style>{`
@@ -125,6 +142,7 @@ export default function Dashboard() {
         .summary-card.paid .value { color: #2e7d32; }
         .summary-card.unpaid .value { color: #e65100; }
         .summary-card.xlm .value { color: #1565c0; }
+        .summary-card.category .value { color: #6a1b9a; }
         .summary-skeleton { height: 1.6rem; width: 60%; background: #e0e0e0; border-radius: 4px; animation: pulse 1.5s infinite; }
       `}</style>
 
@@ -221,6 +239,32 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+
+        {/* Category breakdown */}
+        {categoryCards.length > 0 && (
+          <>
+            <h2 style={{ margin: '1.5rem 0 1rem 0', fontSize: '1.2rem', color: '#1a1a1a' }}>
+              Fee Categories
+            </h2>
+            <div className="summary-cards" aria-label="Fee category breakdown">
+              {categoryCards.map(({ label, value, count, cls }) => (
+                <div key={label} className={`summary-card ${cls}`}>
+                  <div className="label">{label}</div>
+                  {summaryLoading || value == null ? (
+                    <div className="summary-skeleton" aria-hidden="true" />
+                  ) : (
+                    <>
+                      <div className="value">{value}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.25rem' }}>
+                        {count} payment{count !== 1 ? 's' : ''}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </>
   );

@@ -1,31 +1,32 @@
 'use strict';
 
 require('dotenv').config();
-const config  = require('./config');
+const config = require('./config');
 const express = require('express');
-const cors    = require('cors');
+const cors = require('cors');
+const helmet = require('helmet');
 const mongoose = require('mongoose');
 
-const studentRoutes  = require('./routes/studentRoutes');
-const paymentRoutes  = require('./routes/paymentRoutes');
-const feeRoutes      = require('./routes/feeRoutes');
-const reportRoutes   = require('./routes/reportRoutes');
-const schoolRoutes   = require('./routes/schoolRoutes');
+const studentRoutes = require('./routes/studentRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const feeRoutes = require('./routes/feeRoutes');
+const reportRoutes = require('./routes/reportRoutes');
+const schoolRoutes = require('./routes/schoolRoutes');
 const reminderRoutes = require('./routes/reminderRoutes');
-const disputeRoutes  = require('./routes/disputeRoutes');
+const disputeRoutes = require('./routes/disputeRoutes');
 
-const { startPolling, stopPolling }                                   = require('./services/transactionService');
-const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning }     = require('./services/retryService');
-const { startConsistencyScheduler }                                   = require('./services/consistencyScheduler');
-const { startReminderScheduler, stopReminderScheduler }               = require('./services/reminderService');
+const { startPolling, stopPolling } = require('./services/transactionService');
+const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning } = require('./services/retryService');
+const { startConsistencyScheduler } = require('./services/consistencyScheduler');
+const { startReminderScheduler, stopReminderScheduler } = require('./services/reminderService');
 const { startWorker: startTxQueueWorker, stopWorker: stopTxQueueWorker } = require('./services/transactionQueueService');
-const { initializeRetryQueue, setupMonitoring }                       = require('./config/retryQueueSetup');
-const { notFoundHandler, globalErrorHandler }                         = require('./middleware/errorHandler');
-const { requestLogger }                                               = require('./middleware/requestLogger');
-const { createConcurrentRequestMiddleware }                           = require('./middleware/concurrentRequestHandler');
-const { runConsistencyCheck }                                         = require('./controllers/consistencyController');
-const { healthCheck }                                                 = require('./controllers/healthController');
-const logger                                                          = require('./utils/logger');
+const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
+const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
+const { requestLogger } = require('./middleware/requestLogger');
+const { createConcurrentRequestMiddleware } = require('./middleware/concurrentRequestHandler');
+const { runConsistencyCheck } = require('./controllers/consistencyController');
+const { healthCheck } = require('./controllers/healthController');
+const logger = require('./utils/logger');
 
 const morgan = require('morgan');
 
@@ -37,26 +38,43 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-School-ID', 'Idempotency-Key'],
 }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "same-origin" },
+}));
 app.use(express.json());
 app.use(requestLogger());
 
 const concurrentMiddleware = createConcurrentRequestMiddleware({
   circuitBreaker: { failureThreshold: 5, resetTimeoutMs: 30000, halfOpenSuccessThreshold: 2 },
-  queue:          { maxConcurrent: 50, maxSize: 1000, defaultTimeoutMs: 30000 },
-  rateLimit:      { windowMs: 60000, maxRequests: 100 },
+  queue: { maxConcurrent: 50, maxSize: 1000, defaultTimeoutMs: 30000 },
+  rateLimit: { windowMs: 60000, maxRequests: 100 },
   deduplicationTtlMs: 60000,
 });
 app.use(concurrentMiddleware.rateLimiter((req) => req.ip));
 app.use(concurrentMiddleware.requestQueue());
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api/schools',   schoolRoutes);
-app.use('/api/students',  studentRoutes);
-app.use('/api/payments',  paymentRoutes);
-app.use('/api/fees',      feeRoutes);
-app.use('/api/reports',   reportRoutes);
+app.use('/api/schools', schoolRoutes);
+app.use('/api/students', studentRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/fees', feeRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/reminders', reminderRoutes);
-app.use('/api/disputes',  disputeRoutes);
+app.use('/api/disputes', disputeRoutes);
 app.get('/api/consistency', runConsistencyCheck);
 app.get('/health', healthCheck);
 
@@ -151,6 +169,6 @@ async function shutdown(signal) {
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = app;

@@ -7,6 +7,7 @@ const paymentIntentSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     studentId: { type: String, required: true },
     amount: { type: Number, required: true },
+    feeCategory: { type: String, default: null },
     memo: { type: String, required: true, unique: true },
     status: {
       type: String,

@@ -5,44 +5,45 @@ const softDelete = require('../utils/softDelete');
 
 const paymentSchema = new mongoose.Schema(
   {
-    schoolId:             { type: String, required: true, index: true },
-    studentId:            { type: String, required: true, index: true },
+    schoolId: { type: String, required: true, index: true },
+    studentId: { type: String, required: true, index: true },
 
-    txHash:               { type: String, required: true, unique: true, index: true },
-    amount:               { type: Number, required: true },
-    feeAmount:            { type: Number, default: null },
-    feeValidationStatus:  { type: String, enum: ['valid', 'underpaid', 'overpaid', 'unknown'], default: 'unknown' },
-    excessAmount:         { type: Number, default: 0 },
+    txHash: { type: String, required: true, unique: true, index: true },
+    amount: { type: Number, required: true },
+    feeAmount: { type: Number, default: null },
+    feeCategory: { type: String, default: null, index: true },
+    feeValidationStatus: { type: String, enum: ['valid', 'underpaid', 'overpaid', 'unknown'], default: 'unknown' },
+    excessAmount: { type: Number, default: 0 },
 
-    assetCode:            { type: String, default: null },
-    assetType:            { type: String, default: null },
+    assetCode: { type: String, default: null },
+    assetType: { type: String, default: null },
 
-    status:               { type: String, enum: ['PENDING', 'SUBMITTED', 'SUCCESS', 'FAILED'], default: 'PENDING' },
-    memo:                 { type: String },
-    senderAddress:        { type: String, default: null },
-    isSuspicious:         { type: Boolean, default: false },
-    suspicionReason:      { type: String, default: null },
+    status: { type: String, enum: ['PENDING', 'SUBMITTED', 'SUCCESS', 'FAILED'], default: 'PENDING' },
+    memo: { type: String },
+    senderAddress: { type: String, default: null },
+    isSuspicious: { type: Boolean, default: false },
+    suspicionReason: { type: String, default: null },
 
-    ledger:               { type: Number, default: null },
-    ledgerSequence:       { type: Number, default: null },
-    confirmationStatus:   { type: String, enum: ['pending_confirmation', 'confirmed', 'failed'], default: 'pending_confirmation' },
+    ledger: { type: Number, default: null },
+    ledgerSequence: { type: Number, default: null },
+    confirmationStatus: { type: String, enum: ['pending_confirmation', 'confirmed', 'failed'], default: 'pending_confirmation' },
 
     // Audit trail
-    transactionHash:      { type: String, default: null, index: true },
-    startedAt:            { type: Date, default: null },
-    submittedAt:          { type: Date, default: null },
-    confirmedAt:          { type: Date, default: null, index: true },
-    verifiedAt:           { type: Date, default: null },
+    transactionHash: { type: String, default: null, index: true },
+    startedAt: { type: Date, default: null },
+    submittedAt: { type: Date, default: null },
+    confirmedAt: { type: Date, default: null, index: true },
+    verifiedAt: { type: Date, default: null },
 
     // Payment locking
-    lockedUntil:          { type: Date, default: null },
-    lockHolder:           { type: String, default: null },
+    lockedUntil: { type: Date, default: null },
+    lockHolder: { type: String, default: null },
 
     // Reference code
-    referenceCode:        { type: String, default: null },
+    referenceCode: { type: String, default: null },
 
     // Soft Delete
-    deletedAt:            { type: Date, default: null, index: true },
+    deletedAt: { type: Date, default: null, index: true },
   },
   {
     timestamps: true,
@@ -62,6 +63,7 @@ paymentSchema.index({ schoolId: 1, feeValidationStatus: 1 });
 paymentSchema.index({ schoolId: 1, isSuspicious: 1 });
 paymentSchema.index({ schoolId: 1, confirmationStatus: 1 });
 paymentSchema.index({ schoolId: 1, status: 1, confirmedAt: -1 });
+paymentSchema.index({ schoolId: 1, studentId: 1, feeCategory: 1 });
 
 paymentSchema.virtual('explorerUrl').get(function () {
   const hash = this.transactionHash || this.txHash;

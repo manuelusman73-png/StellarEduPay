@@ -261,10 +261,10 @@ async function verifyTransaction(txHash, walletAddress) {
     feeAmount != null
       ? validatePaymentAgainstFee(amount, feeAmount)
       : {
-          status: "unknown",
-          excessAmount: 0,
-          message: "Student not found, cannot validate fee",
-        };
+        status: "unknown",
+        excessAmount: 0,
+        message: "Student not found, cannot validate fee",
+      };
 
   // Extract network fee from transaction
   const networkFee = parseFloat(tx.fee_paid || "0") / 10000000; // Convert stroops to XLM
@@ -397,6 +397,7 @@ async function syncPaymentsForSchool(school) {
           txHash: tx.hash,
           amount: paymentAmount,
           feeAmount: intent.amount,
+          feeCategory: intent.feeCategory || null,
           feeValidationStatus: "underpaid",
           excessAmount: 0,
           status: "FAILED",
@@ -418,6 +419,7 @@ async function syncPaymentsForSchool(school) {
         txHash: tx.hash,
         amount: paymentAmount,
         feeAmount: intent.amount,
+        feeCategory: intent.feeCategory || null,
         feeValidationStatus: cumulativeStatus,
         excessAmount,
         status: "confirmed",
@@ -442,12 +444,48 @@ async function syncPaymentsForSchool(school) {
       });
 
       if (isConfirmed && !collision.suspicious) {
+        // Update student record
+        const updateData = {
+          totalPaid: cumulativeTotal,
+          feePaid: cumulativeTotal >= student.feeAmount,
+        };
+
+        // If this payment is for a specific fee category, update that category's paid status
+        if (intent.feeCategory && student.fees && student.fees.length > 0) {
+          const feeIndex = student.fees.findIndex(f => f.category === intent.feeCategory);
+          if (feeIndex !== -1) {
+            // Calculate new total paid for this category
+            const categoryPayments = await Payment.aggregate([
+              {
+                $match: {
+                  schoolId,
+                  studentId: intent.studentId,
+                  feeCategory: intent.feeCategory,
+                  confirmationStatus: "confirmed",
+                  isSuspicious: false,
+                },
+              },
+              { $group: { _id: null, total: { $sum: "$amount" } } },
+            ]);
+            const categoryTotalPaid = categoryPayments.length
+              ? parseFloat(categoryPayments[0].total.toFixed(7))
+              : 0;
+
+            // Update the specific fee category
+            student.fees[feeIndex].totalPaid = categoryTotalPaid;
+            student.fees[feeIndex].remainingBalance = Math.max(
+              0,
+              student.fees[feeIndex].amount - categoryTotalPaid
+            );
+            student.fees[feeIndex].paid = categoryTotalPaid >= student.fees[feeIndex].amount;
+
+            updateData.fees = student.fees;
+          }
+        }
+
         await Student.findOneAndUpdate(
           { schoolId, studentId: intent.studentId },
-          {
-            totalPaid: cumulativeTotal,
-            feePaid: cumulativeTotal >= student.feeAmount,
-          },
+          updateData,
         );
       }
 
@@ -513,9 +551,47 @@ async function finalizeConfirmedPayments(schoolId) {
       Math.max(0, student.feeAmount - totalPaid).toFixed(7),
     );
 
+    const updateData = { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount };
+
+    // Update fee categories if they exist
+    if (student.fees && student.fees.length > 0) {
+      const categoryPayments = await Payment.aggregate([
+        {
+          $match: {
+            schoolId,
+            studentId: payment.studentId,
+            feeCategory: { $ne: null },
+            confirmationStatus: "confirmed",
+            isSuspicious: false,
+          },
+        },
+        {
+          $group: {
+            _id: "$feeCategory",
+            totalPaid: { $sum: "$amount" },
+          },
+        },
+      ]);
+
+      const categoryPaymentMap = {};
+      categoryPayments.forEach(cp => {
+        categoryPaymentMap[cp._id] = parseFloat(cp.totalPaid.toFixed(7));
+      });
+
+      // Update each fee category
+      student.fees.forEach(fee => {
+        const paid = categoryPaymentMap[fee.category] || 0;
+        fee.totalPaid = paid;
+        fee.remainingBalance = Math.max(0, fee.amount - paid);
+        fee.paid = paid >= fee.amount;
+      });
+
+      updateData.fees = student.fees;
+    }
+
     await Student.findOneAndUpdate(
       { schoolId, studentId: payment.studentId },
-      { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount },
+      updateData,
     );
   }
 }

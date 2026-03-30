@@ -15,8 +15,8 @@ export const getStudents = (page = 1, limit = 50) =>
 export const getPaymentSummary = () => api.get("/payments/summary");
 export const getPaymentInstructions = (studentId) =>
   api.get(`/payments/instructions/${studentId}`);
-export const getStudentPayments = (studentId) =>
-  api.get(`/payments/${studentId}`);
+export const getStudentPayments = (studentId, page = 1) =>
+  api.get(`/payments/${studentId}`, { params: { page } });
 export const verifyPayment = (txHash) =>
   api.post("/payments/verify", { txHash });
 export const syncPayments = () => api.post("/payments/sync");

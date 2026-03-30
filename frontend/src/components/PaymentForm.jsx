@@ -3,28 +3,34 @@ import { getStudent, getPaymentInstructions, getStudentPayments } from '../servi
 import TransactionCard from './TransactionCard';
 
 export default function PaymentForm() {
-  const [studentId, setStudentId]       = useState('');
-  const [student, setStudent]           = useState(null);
+  const [studentId, setStudentId] = useState('');
+  const [student, setStudent] = useState(null);
   const [instructions, setInstructions] = useState(null);
-  const [payments, setPayments]         = useState(null);
-  const [error, setError]               = useState('');
-  const [loading, setLoading]           = useState(false);
-  const [copiedField, setCopiedField]   = useState(null);
+  const [payments, setPayments] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [copiedField, setCopiedField] = useState(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalPayments, setTotalPayments] = useState(0);
   const errorRef = useRef(null);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleSubmit(e, pageNum = 1) {
+    e?.preventDefault();
     setError('');
     setLoading(true);
     try {
       const [stuRes, instrRes, paymentsRes] = await Promise.all([
         getStudent(studentId),
         getPaymentInstructions(studentId),
-        getStudentPayments(studentId),
+        getStudentPayments(studentId, pageNum),
       ]);
       setStudent(stuRes.data);
       setInstructions(instrRes.data);
-      setPayments(paymentsRes.data ?? []);
+      setPayments(paymentsRes.data?.payments ?? []);
+      setTotalPages(paymentsRes.data?.pages ?? 1);
+      setTotalPayments(paymentsRes.data?.total ?? 0);
+      setPage(pageNum);
     } catch {
       setError('Student not found. Please check the ID.');
       errorRef.current?.focus();
@@ -43,7 +49,7 @@ export default function PaymentForm() {
     }
   }
 
-  const local    = instructions?.feeLocalEquivalent;
+  const local = instructions?.feeLocalEquivalent;
   const rateTime = local?.rateTimestamp
     ? new Date(local.rateTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
@@ -73,7 +79,7 @@ export default function PaymentForm() {
       </form>
 
       {error && (
-        <p 
+        <p
           id="errorMessage"
           ref={errorRef}
           role="alert"
@@ -117,7 +123,7 @@ export default function PaymentForm() {
               Send payment to:
             </label>
             <div className="flex-row">
-              <code 
+              <code
                 id="walletAddress"
                 className="code-block"
               >
@@ -140,7 +146,7 @@ export default function PaymentForm() {
               Memo (required):
             </label>
             <div className="flex-row">
-              <code 
+              <code
                 id="memoField"
                 className="code-block"
               >
@@ -181,9 +187,34 @@ export default function PaymentForm() {
           {payments.length === 0 ? (
             <p className="text-muted italic">No payments recorded yet.</p>
           ) : (
-            payments.map(p => (
-              <TransactionCard key={p.txHash || p._id} payment={p} />
-            ))
+            <>
+              {payments.map(p => (
+                <TransactionCard key={p.txHash || p._id} payment={p} />
+              ))}
+              {totalPages > 1 && (
+                <div className="flex-row mt-1" style={{ justifyContent: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit(null, page - 1)}
+                    disabled={page <= 1 || loading}
+                    className="btn-secondary"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-muted" style={{ padding: '0.5rem' }}>
+                    Page {page} of {totalPages} ({totalPayments} total)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit(null, page + 1)}
+                    disabled={page >= totalPages || loading}
+                    className="btn-secondary"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

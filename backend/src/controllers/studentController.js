@@ -74,9 +74,9 @@ async function registerStudent(req, res, next) {
 
 async function getAllStudents(req, res, next) {
   try {
-    const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const [students, total] = await Promise.all([
       Student.find({ schoolId: req.schoolId }).sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -111,8 +111,8 @@ async function updateStudent(req, res, next) {
     const { name, class: className, feeAmount } = req.body;
 
     const update = {};
-    if (name      !== undefined) update.name      = name;
-    if (className !== undefined) update.class     = className;
+    if (name !== undefined) update.name = name;
+    if (className !== undefined) update.class = className;
     if (feeAmount !== undefined) update.feeAmount = feeAmount;
 
     const student = await Student.findOneAndUpdate(
@@ -175,15 +175,15 @@ async function getPaymentSummary(req, res, next) {
       const totalPaid = parseFloat((paidMap[s.studentId] || 0).toFixed(7));
       const remaining = parseFloat(Math.max(0, s.feeAmount - totalPaid).toFixed(7));
       const status = totalPaid === 0 ? 'unpaid'
-        : totalPaid < s.feeAmount  ? 'partial'
-        : totalPaid > s.feeAmount  ? 'overpaid'
-        : 'paid';
+        : totalPaid < s.feeAmount ? 'partial'
+          : totalPaid > s.feeAmount ? 'overpaid'
+            : 'paid';
 
       return {
-        studentId:   s.studentId,
-        name:        s.name,
-        class:       s.class,
-        feeAmount:   s.feeAmount,
+        studentId: s.studentId,
+        name: s.name,
+        class: s.class,
+        feeAmount: s.feeAmount,
         totalPaid,
         remaining,
         status,
@@ -327,4 +327,63 @@ async function getOverdueStudents(req, res, next) {
   }
 }
 
-module.exports = { registerStudent, getAllStudents, getStudent, updateStudent, deleteStudent, getPaymentSummary, bulkImportStudents, getOverdueStudents };
+async function resetPayment(req, res, next) {
+  try {
+    const { studentId } = req.params;
+    const { deletePayments = false } = req.body;
+    const schoolId = req.schoolId;
+
+    // Find the student
+    const student = await Student.findOne({ schoolId, studentId });
+    if (!student) {
+      const err = new Error('Student not found');
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
+
+    // Reset feePaid status
+    student.feePaid = false;
+    student.totalPaid = 0;
+    student.remainingBalance = student.feeAmount;
+    await student.save();
+
+    // Log the reset action
+    const logger = require('../utils/logger');
+    logger.info('Payment status reset', {
+      studentId,
+      schoolId,
+      adminId: req.user?.id,
+      timestamp: new Date().toISOString(),
+      deletePayments,
+    });
+
+    // Optionally delete associated payment records
+    if (deletePayments) {
+      const Payment = require('../models/paymentModel');
+      const deleteResult = await Payment.deleteMany({ schoolId, studentId });
+      logger.info('Payment records deleted', {
+        studentId,
+        schoolId,
+        adminId: req.user?.id,
+        deletedCount: deleteResult.deletedCount,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    res.json({
+      message: 'Payment status reset successfully',
+      student: {
+        studentId: student.studentId,
+        name: student.name,
+        feePaid: student.feePaid,
+        totalPaid: student.totalPaid,
+        remainingBalance: student.remainingBalance,
+      },
+      paymentsDeleted: deletePayments,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { registerStudent, getAllStudents, getStudent, updateStudent, deleteStudent, getPaymentSummary, bulkImportStudents, getOverdueStudents, resetPayment };
