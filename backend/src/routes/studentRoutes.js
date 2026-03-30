@@ -17,6 +17,7 @@ const {
 const { validateRegisterStudent, validateStudentIdParam } = require('../middleware/validate');
 const { resolveSchool } = require('../middleware/schoolContext');
 const { requireAdminAuth } = require('../middleware/auth');
+const { auditContext } = require('../middleware/auditContext');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 

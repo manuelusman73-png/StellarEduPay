@@ -36,6 +36,7 @@ const {
   enrichPaymentWithConversion,
 } = require("../services/currencyConversionService");
 const { withStellarRetry } = require("../utils/withStellarRetry");
+const { logAudit } = require("../services/auditService");
 
 // Permanent error codes that should NOT be retried
 const PERMANENT_FAIL_CODES = [
@@ -352,13 +353,47 @@ async function verifyPayment(req, res, next) {
 
     const normalizedHash = hashValidation.normalized;
 
+    // Check if payment already exists (idempotency)
     const existing = await Payment.findOne({ txHash: normalizedHash });
     if (existing) {
-      const err = new Error(
-        "Transaction " + normalizedHash + " has already been processed",
+      // Return cached result instead of error
+      const targetCurrency = req.school.localCurrency || "USD";
+      const conversion = await convertToLocalCurrency(
+        existing.amount,
+        existing.assetCode || "XLM",
+        targetCurrency,
       );
-      err.code = "DUPLICATE_TX";
-      return next(err);
+
+      const stellarExplorerUrl = getExplorerUrl(existing.txHash);
+      
+      return res.json({
+        verified: true,
+        cached: true,
+        hash: existing.txHash,
+        stellarExplorerUrl,
+        explorerUrl: stellarExplorerUrl,
+        memo: existing.memo,
+        studentId: existing.studentId,
+        amount: existing.amount,
+        assetCode: existing.assetCode,
+        assetType: existing.assetType,
+        feeAmount: existing.feeAmount,
+        feeValidation: {
+          status: existing.feeValidationStatus,
+          excessAmount: existing.excessAmount,
+        },
+        networkFee: existing.networkFee || null,
+        date: existing.confirmedAt || existing.createdAt,
+        status: existing.status,
+        confirmationStatus: existing.confirmationStatus,
+        localCurrency: {
+          amount: conversion.available ? conversion.localAmount : null,
+          currency: conversion.currency,
+          rate: conversion.rate,
+          rateTimestamp: conversion.rateTimestamp,
+          available: conversion.available,
+        },
+      });
     }
 
     let result;
@@ -462,6 +497,7 @@ async function verifyPayment(req, res, next) {
     const stellarExplorerUrl = getExplorerUrl(result.hash);
     res.json({
       verified: true,
+      cached: false,
       hash: result.hash,
       stellarExplorerUrl,
       explorerUrl: stellarExplorerUrl,
@@ -521,9 +557,40 @@ async function syncAllPayments(req, res, next) {
   }
   _syncLocks.add(schoolId);
   try {
-    await syncPaymentsForSchool(req.school);
+    const result = await syncPaymentsForSchool(req.school);
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'payment_manual_sync',
+        performedBy: req.auditContext.performedBy,
+        targetId: schoolId,
+        targetType: 'payment',
+        details: { syncResult: result },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: "Sync complete" });
   } catch (err) {
+    // Audit log for failure
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'payment_manual_sync',
+        performedBy: req.auditContext.performedBy,
+        targetId: schoolId,
+        targetType: 'payment',
+        details: {},
+        result: 'failure',
+        errorMessage: err.message,
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
     next(wrapStellarError(err));
   } finally {
     _syncLocks.delete(schoolId);
@@ -545,7 +612,23 @@ async function getSyncStatus(req, res, next) {
 
 async function finalizePayments(req, res, next) {
   try {
-    await finalizeConfirmedPayments(req.schoolId);
+    const result = await finalizeConfirmedPayments(req.schoolId);
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: req.schoolId,
+        action: 'payment_finalize',
+        performedBy: req.auditContext.performedBy,
+        targetId: req.schoolId,
+        targetType: 'payment',
+        details: { finalizeResult: result },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: "Finalization complete" });
   } catch (err) {
     next(err);

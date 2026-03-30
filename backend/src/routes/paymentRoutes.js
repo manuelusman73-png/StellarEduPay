@@ -42,6 +42,7 @@ const {
 const { resolveSchool } = require("../middleware/schoolContext");
 const idempotency = require("../middleware/idempotency");
 const { requireAdminAuth } = require("../middleware/auth");
+const { auditContext } = require("../middleware/auditContext");
 const { strictLimiter } = require("../middleware/rateLimiter");
 
 // No school context required
@@ -86,8 +87,8 @@ router.post(
   validateVerifyPayment,
   verifyPayment,
 );
-router.post("/sync", strictLimiter, requireAdminAuth, syncAllPayments);
-router.post("/finalize", requireAdminAuth, finalizePayments);
+router.post("/sync", strictLimiter, requireAdminAuth, auditContext, syncAllPayments);
+router.post("/finalize", requireAdminAuth, auditContext, finalizePayments);
 router.post("/dlq/:id/retry", retryDeadLetterJob);
 
 router.get("/balance/:studentId", validateStudentIdParam, getStudentBalance);

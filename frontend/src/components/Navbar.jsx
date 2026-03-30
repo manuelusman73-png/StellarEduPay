@@ -4,10 +4,10 @@ import { useRouter } from 'next/router';
 import TestnetBanner from './TestnetBanner';
 
 const LINKS = [
-  { href: '/',          label: 'Home' },
-  { href: '/pay-fees',  label: 'Pay Fees' },
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/reports',   label: 'Reports' },
+  { href: "/", label: "Home" },
+  { href: "/pay-fees", label: "Pay Fees" },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/reports", label: "Reports" },
 ];
 
 export default function Navbar() {
@@ -31,19 +31,28 @@ export default function Navbar() {
 
       <nav style={{ background: '#1a1a2e', padding: '0.75rem 2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {/* Brand */}
-        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}>
-          <span style={{ fontSize: '1.3rem' }} aria-hidden="true">🌟</span>
-          <span style={{ color: '#fff', fontWeight: 700, fontSize: '1rem', letterSpacing: '0.02em' }}>StellarEduPay</span>
+        <Link
+          href="/"
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem", textDecoration: "none" }}
+        >
+          <span style={{ fontSize: "1.3rem" }} aria-hidden="true">
+            🌟
+          </span>
+          <span
+            style={{ color: "#fff", fontWeight: 700, fontSize: "1rem", letterSpacing: "0.02em" }}
+          >
+            StellarEduPay
+          </span>
         </Link>
 
         {/* Desktop links */}
-        <div className="nav-links" style={{ display: 'flex', gap: '1.75rem' }}>
+        <div className="nav-links" style={{ display: "flex", gap: "1.75rem" }}>
           {LINKS.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
-              className={`nav-link${pathname === href ? ' active' : ''}`}
-              aria-current={pathname === href ? 'page' : undefined}
+              className={`nav-link${pathname === href ? " active" : ""}`}
+              aria-current={pathname === href ? "page" : undefined}
             >
               {label}
             </Link>
@@ -54,31 +63,31 @@ export default function Navbar() {
         <button
           className="hamburger"
           onClick={() => setOpen((o) => !o)}
-          aria-label={open ? 'Close menu' : 'Open menu'}
+          aria-label={open ? "Close menu" : "Open menu"}
           aria-expanded={open}
           style={{
-            display: 'none',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: '#fff',
-            fontSize: '1.4rem',
+            display: "none",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: "1.4rem",
             lineHeight: 1,
             padding: 0,
           }}
         >
-          {open ? '✕' : '☰'}
+          {open ? "✕" : "☰"}
         </button>
       </nav>
 
       {/* Mobile dropdown */}
-      <div className={`nav-links${open ? ' open' : ''}`}>
+      <div className={`nav-links${open ? " open" : ""}`}>
         {LINKS.map(({ href, label }) => (
           <Link
             key={href}
             href={href}
-            className={`nav-link${pathname === href ? ' active' : ''}`}
-            aria-current={pathname === href ? 'page' : undefined}
+            className={`nav-link${pathname === href ? " active" : ""}`}
+            aria-current={pathname === href ? "page" : undefined}
             onClick={() => setOpen(false)}
           >
             {label}

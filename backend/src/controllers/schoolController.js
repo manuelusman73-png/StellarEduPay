@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const School = require('../models/schoolModel');
+const { logAudit } = require('../services/auditService');
 
 // POST /api/schools
 async function createSchool(req, res, next) {
@@ -29,6 +30,21 @@ async function createSchool(req, res, next) {
       adminEmail: adminEmail || null,
       address: address || null,
     });
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'school_create',
+        performedBy: req.auditContext.performedBy,
+        targetId: schoolId,
+        targetType: 'school',
+        details: { name, slug, stellarAddress, network: network || 'testnet' },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
 
     res.status(201).json(school);
   } catch (err) {
@@ -79,16 +95,35 @@ async function updateSchool(req, res, next) {
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
+
+    const original = await School.findOne({ slug: req.params.schoolSlug.toLowerCase(), isActive: true }).lean();
+    if (!original) {
+      const e = new Error('School not found');
+      e.code = 'NOT_FOUND';
+      return next(e);
+    }
+
     const school = await School.findOneAndUpdate(
       { slug: req.params.schoolSlug.toLowerCase(), isActive: true },
       updates,
       { new: true, runValidators: true }
     );
-    if (!school) {
-      const e = new Error('School not found');
-      e.code = 'NOT_FOUND';
-      return next(e);
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: school.schoolId,
+        action: 'school_update',
+        performedBy: req.auditContext.performedBy,
+        targetId: school.schoolId,
+        targetType: 'school',
+        details: { before: original, after: updates },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
     }
+
     res.json(school);
   } catch (err) {
     next(err);
@@ -108,6 +143,22 @@ async function deactivateSchool(req, res, next) {
       e.code = 'NOT_FOUND';
       return next(e);
     }
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: school.schoolId,
+        action: 'school_deactivate',
+        performedBy: req.auditContext.performedBy,
+        targetId: school.schoolId,
+        targetType: 'school',
+        details: { name: school.name, slug: school.slug },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: `School "${school.name}" deactivated` });
   } catch (err) {
     next(err);

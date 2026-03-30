@@ -5,6 +5,7 @@ const FeeStructure = require('../models/feeStructureModel');
 const { get, set, del, KEYS, TTL } = require('../cache');
 const csv = require('csv-parser');
 const { Readable } = require('stream');
+const { logAudit } = require('../services/auditService');
 
 async function registerStudent(req, res, next) {
   try {
@@ -53,6 +54,21 @@ async function registerStudent(req, res, next) {
 
     del(KEYS.studentsAll());
 
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'student_create',
+        performedBy: req.auditContext.performedBy,
+        targetId: studentId,
+        targetType: 'student',
+        details: { name, class: className, feeAmount: assignedFee },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     const response = student.toObject ? student.toObject() : { ...student };
     if (similarStudent) {
       response.warning = `A student named "${similarStudent.name}" already exists in class ${className} with ID "${similarStudent.studentId}". This may be a duplicate.`;
@@ -99,6 +115,22 @@ async function deleteStudent(req, res, next) {
       return next(err);
     }
     del(KEYS.student(studentId));
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: req.schoolId,
+        action: 'student_delete',
+        performedBy: req.auditContext.performedBy,
+        targetId: studentId,
+        targetType: 'student',
+        details: { name: student.name, class: student.class },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: `Student ${studentId} deleted` });
   } catch (err) {
     next(err);
@@ -110,6 +142,13 @@ async function updateStudent(req, res, next) {
     const { studentId } = req.params;
     const { name, class: className, feeAmount } = req.body;
 
+    const original = await Student.findOne({ schoolId: req.schoolId, studentId }).lean();
+    if (!original) {
+      const err = new Error('Student not found');
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
+
     const update = {};
     if (name !== undefined) update.name = name;
     if (className !== undefined) update.class = className;
@@ -120,13 +159,27 @@ async function updateStudent(req, res, next) {
       update,
       { new: true, runValidators: true },
     );
-    if (!student) {
-      const err = new Error('Student not found');
-      err.code = 'NOT_FOUND';
-      return next(err);
-    }
 
     del(KEYS.student(studentId));
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: req.schoolId,
+        action: 'student_update',
+        performedBy: req.auditContext.performedBy,
+        targetId: studentId,
+        targetType: 'student',
+        details: {
+          before: { name: original.name, class: original.class, feeAmount: original.feeAmount },
+          after: { name: student.name, class: student.class, feeAmount: student.feeAmount },
+        },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json(student);
   } catch (err) {
     if (err.name === 'ValidationError') {
@@ -306,6 +359,21 @@ async function bulkImportStudents(req, res, next) {
     }
 
     del(KEYS.studentsAll());
+
+    // Audit log for bulk import
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'student_bulk_import',
+        performedBy: req.auditContext.performedBy,
+        targetId: 'bulk',
+        targetType: 'student',
+        details: { total: results.total, created: results.created, failed: results.failed },
+        result: results.created > 0 ? 'success' : 'failure',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
 
     res.status(results.failed === results.total ? 400 : 201).json(results);
   } catch (err) {

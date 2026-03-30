@@ -139,7 +139,7 @@ const server = require.main === module
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown(signal) {
-  logger.info(`Received ${signal} — starting graceful shutdown`);
+  logger.info(`Received ${signal} signal — starting graceful shutdown`);
 
   stopPolling();
   stopRetryWorker();

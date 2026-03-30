@@ -2,6 +2,7 @@
 
 const FeeStructure = require('../models/feeStructureModel');
 const { get, set, del, KEYS, TTL } = require('../cache');
+const { logAudit } = require('../services/auditService');
 
 // POST /api/fees
 async function createFeeStructure(req, res, next) {
@@ -13,13 +14,41 @@ async function createFeeStructure(req, res, next) {
       err.code = 'VALIDATION_ERROR';
       return next(err);
     }
+
+    const existing = await FeeStructure.findOne({ schoolId, className });
+    const isUpdate = !!existing;
+
     const fee = await FeeStructure.findOneAndUpdate(
       { schoolId, className },
       { feeAmount, description, academicYear, isActive: true, paymentDeadline: paymentDeadline || null },
       { upsert: true, new: true, runValidators: true }
     );
+
     // Invalidate fee caches so next read reflects the change
     del(KEYS.feesAll(), KEYS.feeByClass(className));
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: isUpdate ? 'fee_update' : 'fee_create',
+        performedBy: req.auditContext.performedBy,
+        targetId: className,
+        targetType: 'fee',
+        details: {
+          className,
+          feeAmount,
+          description,
+          academicYear,
+          paymentDeadline,
+          ...(isUpdate && existing ? { before: { feeAmount: existing.feeAmount } } : {}),
+        },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.status(201).json(fee);
   } catch (err) {
     next(err);
@@ -82,6 +111,22 @@ async function deleteFeeStructure(req, res, next) {
     }
     // Invalidate fee caches
     del(KEYS.feesAll(), KEYS.feeByClass(className));
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: req.schoolId,
+        action: 'fee_delete',
+        performedBy: req.auditContext.performedBy,
+        targetId: className,
+        targetType: 'fee',
+        details: { className, feeAmount: fee.feeAmount },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: `Fee structure for class ${className} deactivated` });
   } catch (err) {
     next(err);
