@@ -950,3 +950,133 @@ The transaction processing queue (`transactionQueue.js`) provides **durable job 
 | `REDIS_PORT` | `6379` | Redis port |
 | `REDIS_PASSWORD` | _(none)_ | Redis password (optional) |
 
+
+---
+
+## Source Validation Rules
+
+Source validation rules allow administrators to control which Stellar payment source addresses are accepted or flagged. Rules are global (not per-school) and are evaluated during payment processing.
+
+### Rule Types
+
+| Type | Description |
+|------|-------------|
+| `blacklist` | Reject payments from a specific source address |
+| `whitelist` | Only accept payments from a specific source address |
+| `pattern` | Match source addresses against a regular expression |
+| `new_sender_limit` | Cap the number of transactions per day from first-time senders |
+
+### Endpoints
+
+All source-rule endpoints require admin authentication (`Authorization: Bearer <token>`).
+
+---
+
+#### POST /api/source-rules
+
+Create a new source validation rule.
+
+**Request body:**
+
+```json
+{
+  "name": "block-suspicious-sender",
+  "type": "blacklist",
+  "value": "GBADACTOR...",
+  "description": "Known fraudulent address",
+  "isActive": true,
+  "priority": 10
+}
+```
+
+For `new_sender_limit` rules, include `maxTransactionsPerDay` instead of `value`:
+
+```json
+{
+  "name": "new-sender-cap",
+  "type": "new_sender_limit",
+  "maxTransactionsPerDay": 3,
+  "description": "Limit new senders to 3 transactions per day"
+}
+```
+
+**Required fields:** `name`, `type`  
+**Required for blacklist/whitelist/pattern:** `value`
+
+**Response `201`:**
+
+```json
+{
+  "_id": "...",
+  "name": "block-suspicious-sender",
+  "type": "blacklist",
+  "value": "GBADACTOR...",
+  "description": "Known fraudulent address",
+  "isActive": true,
+  "priority": 10,
+  "maxTransactionsPerDay": null,
+  "createdAt": "2026-04-23T00:00:00.000Z",
+  "updatedAt": "2026-04-23T00:00:00.000Z"
+}
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 400 | `VALIDATION_ERROR` | Missing required fields, invalid type, or invalid regex pattern |
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 409 | `DUPLICATE_RULE` | A rule with this name already exists |
+
+---
+
+#### GET /api/source-rules
+
+List all source validation rules. Supports optional query filters.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `type` | string | Filter by rule type (`blacklist`, `whitelist`, `pattern`, `new_sender_limit`) |
+| `isActive` | boolean | Filter by active status (`true` or `false`) |
+
+**Response `200`:**
+
+```json
+[
+  {
+    "_id": "...",
+    "name": "block-suspicious-sender",
+    "type": "blacklist",
+    "value": "GBADACTOR...",
+    "isActive": true,
+    "priority": 10,
+    "createdAt": "2026-04-23T00:00:00.000Z"
+  }
+]
+```
+
+---
+
+#### DELETE /api/source-rules/:id
+
+Permanently delete a source validation rule by its MongoDB `_id`.
+
+**Response `200`:**
+
+```json
+{
+  "message": "Rule \"block-suspicious-sender\" deleted."
+}
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 404 | `NOT_FOUND` | No rule found with the given id |
+
