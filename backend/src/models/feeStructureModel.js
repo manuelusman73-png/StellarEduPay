@@ -17,6 +17,7 @@ const feeStructureSchema = new mongoose.Schema(
 
 // className must be unique per school (was globally unique before)
 feeStructureSchema.index({ schoolId: 1, className: 1 }, { unique: true });
+feeStructureSchema.index({ schoolId: 1, className: 1, isActive: 1 });
 feeStructureSchema.index({ schoolId: 1, isActive: 1 });
 
 module.exports = mongoose.model('FeeStructure', feeStructureSchema);
