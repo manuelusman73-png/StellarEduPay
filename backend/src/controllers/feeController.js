@@ -15,14 +15,31 @@ async function createFeeStructure(req, res, next) {
       return next(err);
     }
 
-    const existing = await FeeStructure.findOne({ schoolId, className });
-    const isUpdate = !!existing;
+    // Check for existing active fee structure for same class/academic year
+    const existing = await FeeStructure.findOne({
+      schoolId,
+      className,
+      isActive: true,
+    });
 
-    const fee = await FeeStructure.findOneAndUpdate(
-      { schoolId, className },
-      { feeAmount, description, academicYear, isActive: true, paymentDeadline: paymentDeadline || null },
-      { upsert: true, new: true, runValidators: true }
-    );
+    if (existing) {
+      const err = new Error(
+        `An active fee structure already exists for class ${className} in academic year ${existing.academicYear}`
+      );
+      err.code = 'DUPLICATE_FEE_STRUCTURE';
+      err.status = 409;
+      return next(err);
+    }
+
+    const fee = await FeeStructure.create({
+      schoolId,
+      className,
+      feeAmount,
+      description,
+      academicYear: academicYear || new Date().getUTCFullYear().toString(),
+      isActive: true,
+      paymentDeadline: paymentDeadline || null,
+    });
 
     // Invalidate fee caches so next read reflects the change
     del(KEYS.feesAll(), KEYS.feeByClass(className));
@@ -31,7 +48,7 @@ async function createFeeStructure(req, res, next) {
     if (req.auditContext) {
       await logAudit({
         schoolId,
-        action: isUpdate ? 'fee_update' : 'fee_create',
+        action: 'fee_create',
         performedBy: req.auditContext.performedBy,
         targetId: className,
         targetType: 'fee',
@@ -41,7 +58,6 @@ async function createFeeStructure(req, res, next) {
           description,
           academicYear,
           paymentDeadline,
-          ...(isUpdate && existing ? { before: { feeAmount: existing.feeAmount } } : {}),
         },
         result: 'success',
         ipAddress: req.auditContext.ipAddress,
@@ -133,4 +149,56 @@ async function deleteFeeStructure(req, res, next) {
   }
 }
 
-module.exports = { createFeeStructure, getAllFeeStructures, getFeeByClass, deleteFeeStructure };
+// PUT /api/fees/:className
+async function updateFeeStructure(req, res, next) {
+  try {
+    const { className } = req.params;
+    const { feeAmount, description, paymentDeadline } = req.body;
+
+    if (feeAmount == null) {
+      const err = new Error('feeAmount is required');
+      err.code = 'VALIDATION_ERROR';
+      return next(err);
+    }
+
+    const fee = await FeeStructure.findOneAndUpdate(
+      { schoolId: req.schoolId, className, isActive: true },
+      {
+        feeAmount,
+        description: description !== undefined ? description : undefined,
+        paymentDeadline: paymentDeadline !== undefined ? paymentDeadline : undefined,
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!fee) {
+      const err = new Error(`No active fee structure found for class ${className}`);
+      err.code = 'NOT_FOUND';
+      return next(err);
+    }
+
+    // Invalidate fee caches
+    del(KEYS.feesAll(), KEYS.feeByClass(className));
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: req.schoolId,
+        action: 'fee_update',
+        performedBy: req.auditContext.performedBy,
+        targetId: className,
+        targetType: 'fee',
+        details: { className, feeAmount, description, paymentDeadline },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
+    res.json(fee);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createFeeStructure, getAllFeeStructures, getFeeByClass, deleteFeeStructure, updateFeeStructure };
