@@ -869,8 +869,18 @@ Simple liveness probe. No auth or school context required.
 
 **Response `200`**
 ```json
-{ "status": "ok" }
+{
+  "status": "healthy",
+  "timestamp": "2026-04-23T15:00:00.000Z",
+  "checks": {
+    "database": { "status": "healthy", "latency_ms": 2 },
+    "stellar": { "status": "healthy", "latency_ms": 120, "network": "testnet", "horizonUrl": "https://horizon-testnet.stellar.org" },
+    "paymentProcessor": { "queueDepth": 0, "maxQueueDepth": 1000 }
+  }
+}
 ```
+
+`checks.paymentProcessor.queueDepth` is the number of payments currently being processed. When it reaches `maxQueueDepth` (controlled by `MAX_QUEUE_DEPTH` env var), new payments return `QUEUE_FULL` and are retried automatically.
 
 ---
 
@@ -910,6 +920,7 @@ Validation middleware failures return an `errors` array:
 | `DUPLICATE_STUDENT` | 409 | Student ID already exists for this school |
 | `STELLAR_NETWORK_ERROR` | 502 | Stellar Horizon API unreachable |
 | `REQUEST_TIMEOUT` | 503 | Request exceeded server timeout |
+| `QUEUE_FULL` | 503 | Payment processor queue is at capacity; caller should retry after a delay |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
 
 ---

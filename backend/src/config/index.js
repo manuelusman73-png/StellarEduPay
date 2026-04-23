@@ -69,6 +69,9 @@ const MAX_PAYMENT_AMOUNT = parseFloat(
   process.env.MAX_PAYMENT_AMOUNT || "100000",
 );
 
+// ── Concurrent Payment Processor ─────────────────────────────────────────────
+const MAX_QUEUE_DEPTH = parseInt(process.env.MAX_QUEUE_DEPTH || "1000", 10);
+
 if (MIN_PAYMENT_AMOUNT < 0) {
   throw new Error("[Config] MIN_PAYMENT_AMOUNT must be a positive number");
 }
@@ -132,6 +135,7 @@ const config = Object.freeze({
   RETRY_MAX_ATTEMPTS,
   MIN_PAYMENT_AMOUNT,
   MAX_PAYMENT_AMOUNT,
+  MAX_QUEUE_DEPTH,
   REQUEST_TIMEOUT_MS,
   STELLAR_TIMEOUT_MS,
   JWT_SECRET,

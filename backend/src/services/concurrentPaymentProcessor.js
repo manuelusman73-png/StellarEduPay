@@ -123,6 +123,8 @@ class ConcurrentPaymentProcessor {
       options.lockStrategy || CONCURRENCY_STRATEGY.OPTIMISTIC;
     this.lockTimeoutMs = options.lockTimeoutMs || 30000;
     this.maxRetries = options.maxRetries || 3;
+    this.maxQueueDepth = options.maxQueueDepth || 1000;
+    this.activeCount = 0;
   }
 
   // ── Process Payment ───────────────────────────────────────────────────────
@@ -134,6 +136,15 @@ class ConcurrentPaymentProcessor {
       amount,
       txHash,
     } = options;
+
+    // Queue depth check
+    if (this.activeCount >= this.maxQueueDepth) {
+      return new PaymentProcessingResult(
+        false,
+        {},
+        { message: "Queue is full", code: "QUEUE_FULL" }
+      );
+    }
 
     // Idempotency check
     if (idempotencyKey && this.idempotencyCache.has(idempotencyKey)) {
@@ -157,6 +168,7 @@ class ConcurrentPaymentProcessor {
       );
     }
 
+    this.activeCount++;
     try {
       // Duplicate transaction
       const existingPayment = await Payment.findOne({ txHash });
@@ -219,6 +231,8 @@ class ConcurrentPaymentProcessor {
         {},
         { message: err.message, code: "PROCESSING_ERROR" }
       );
+    } finally {
+      this.activeCount--;
     }
   }
 
@@ -490,11 +504,24 @@ class ConcurrentPaymentProcessor {
   async processBatch(payments, options = {}) {
     const results = [];
     const concurrencyLimit = options.concurrencyLimit || 10;
+    const queueFullRetryDelayMs = options.queueFullRetryDelayMs || 500;
 
     for (let i = 0; i < payments.length; i += concurrencyLimit) {
       const batch = payments.slice(i, i + concurrencyLimit);
       const batchResults = await Promise.allSettled(
-        batch.map((p) => this.processPayment(p, options))
+        batch.map(async (p) => {
+          let result = await this.processPayment(p, options);
+          while (result && result.error && result.error.code === "QUEUE_FULL") {
+            logger.warn("[PaymentProcessor] Queue full, retrying after delay", {
+              retryDelayMs: queueFullRetryDelayMs,
+            });
+            await new Promise((resolve) =>
+              setTimeout(resolve, queueFullRetryDelayMs)
+            );
+            result = await this.processPayment(p, options);
+          }
+          return result;
+        })
       );
 
       for (const res of batchResults) {
@@ -520,9 +547,13 @@ class ConcurrentPaymentProcessor {
       transactionManagerStats: {
         activeTransactions: transactionManager.getActiveTransactionCount(),
       },
+      queueDepth: this.activeCount,
+      maxQueueDepth: this.maxQueueDepth,
     };
   }
 }
+
+const config = require("../config");
 
 // ── Singleton Instance ─────────────────────────────────────────────────────
 const concurrentPaymentProcessor = new ConcurrentPaymentProcessor({
@@ -531,6 +562,7 @@ const concurrentPaymentProcessor = new ConcurrentPaymentProcessor({
   lockStrategy: CONCURRENCY_STRATEGY.OPTIMISTIC,
   lockTimeoutMs: 30000,
   maxRetries: 3,
+  maxQueueDepth: config.MAX_QUEUE_DEPTH,
 });
 
 module.exports = {
