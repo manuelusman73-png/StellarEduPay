@@ -20,6 +20,27 @@
 
 const { logger } = require('../utils/logger');
 
+const DEFAULT_REDACT_FIELDS = ['txHash', 'studentId', 'memo', 'senderAddress'];
+
+function getRedactFields() {
+  if (process.env.LOG_REDACT_FIELDS) {
+    return process.env.LOG_REDACT_FIELDS.split(',').map((f) => f.trim()).filter(Boolean);
+  }
+  return DEFAULT_REDACT_FIELDS;
+}
+
+function redact(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const fields = getRedactFields();
+  const result = { ...obj };
+  for (const key of Object.keys(result)) {
+    if (fields.includes(key)) {
+      result[key] = '[REDACTED]';
+    }
+  }
+  return result;
+}
+
 let _counter = 0;
 
 function generateRequestId() {
@@ -40,13 +61,22 @@ function requestLogger() {
       req.socket?.remoteAddress ||
       'unknown';
 
-    logger.info('[Request] incoming', {
+    const logData = {
       requestId,
       method: req.method,
       url: req.originalUrl,
       ip,
       userAgent: req.headers['user-agent'] || '',
-    });
+    };
+
+    if (req.body && Object.keys(req.body).length > 0) {
+      logData.body = redact(req.body);
+    }
+    if (req.query && Object.keys(req.query).length > 0) {
+      logData.query = redact(req.query);
+    }
+
+    logger.info('[Request] incoming', logData);
 
     res.on('finish', () => {
       const durationMs = Date.now() - startedAt;
@@ -66,4 +96,4 @@ function requestLogger() {
   };
 }
 
-module.exports = { requestLogger };
+module.exports = { requestLogger, redact };
