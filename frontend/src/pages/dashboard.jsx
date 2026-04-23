@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import SyncButton from "../components/SyncButton";
+import ErrorBoundary from "../components/ErrorBoundary";
 import { getSyncStatus, getPaymentSummary, getStudents } from "../services/api";
 
 const PAGE_SIZE = 10;
@@ -25,8 +26,10 @@ export default function Dashboard() {
   const [syncMsg, setSyncMsg]           = useState(null);
   const [summary, setSummary]           = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError]     = useState(null);
   const [students, setStudents]         = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentsError, setStudentsError]   = useState(null);
   const [page, setPage]                 = useState(1);
   const [pages, setPages]               = useState(1);
   const [search, setSearch]             = useState("");
@@ -35,20 +38,22 @@ export default function Dashboard() {
 
   const fetchSummary = useCallback(() => {
     setSummaryLoading(true);
+    setSummaryError(null);
     getPaymentSummary()
       .then(({ data }) => setSummary(data))
-      .catch(() => {})
+      .catch(() => setSummaryError("Could not load payment summary."))
       .finally(() => setSummaryLoading(false));
   }, []);
 
   const fetchStudents = useCallback((p) => {
     setStudentsLoading(true);
+    setStudentsError(null);
     getStudents(p, PAGE_SIZE)
       .then(({ data }) => {
         setStudents(data.students || data);
         setPages(data.pages || 1);
       })
-      .catch(() => {})
+      .catch(() => setStudentsError("Could not load student list."))
       .finally(() => setStudentsLoading(false));
   }, []);
 
@@ -135,19 +140,28 @@ export default function Dashboard() {
         )}
 
         {/* Stats */}
-        <div className="stat-grid" style={{ marginTop: "1.5rem" }}>
-          {stats.map(({ label, value, sub, accent }) => (
-            <div key={label} className="stat-card">
-              <div className="stat-label">{label}</div>
-              {summaryLoading ? <div className="skeleton" /> : (
-                <>
-                  <div className="stat-value" style={accent ? { color: accent } : {}}>{value}</div>
-                  {sub && <div className="stat-sub">{sub}</div>}
-                </>
-              )}
+        <ErrorBoundary>
+          {summaryError ? (
+            <div style={{ background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 8, padding: "0.65rem 1rem", color: "#991b1b", fontSize: "0.875rem", margin: "1rem 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              {summaryError}
+              <button onClick={fetchSummary} style={{ marginLeft: "1rem", padding: "0.25rem 0.75rem", borderRadius: 6, border: "1px solid #fecaca", background: "transparent", color: "#991b1b", cursor: "pointer", fontSize: "0.8rem" }}>Retry</button>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="stat-grid" style={{ marginTop: "1.5rem" }}>
+              {stats.map(({ label, value, sub, accent }) => (
+                <div key={label} className="stat-card">
+                  <div className="stat-label">{label}</div>
+                  {summaryLoading ? <div className="skeleton" /> : (
+                    <>
+                      <div className="stat-value" style={accent ? { color: accent } : {}}>{value}</div>
+                      {sub && <div className="stat-sub">{sub}</div>}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </ErrorBoundary>
 
         {/* Toolbar */}
         <div className="toolbar">
@@ -165,42 +179,51 @@ export default function Dashboard() {
         </div>
 
         {/* Table */}
-        <div className="table-wrap">
-          {studentsLoading ? (
-            <div style={{ padding: "2rem", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>Loading…</div>
+        <ErrorBoundary>
+          {studentsError ? (
+            <div style={{ background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 8, padding: "0.65rem 1rem", color: "#991b1b", fontSize: "0.875rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              {studentsError}
+              <button onClick={() => fetchStudents(page)} style={{ marginLeft: "1rem", padding: "0.25rem 0.75rem", borderRadius: 6, border: "1px solid #fecaca", background: "transparent", color: "#991b1b", cursor: "pointer", fontSize: "0.8rem" }}>Retry</button>
+            </div>
           ) : (
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>Student ID</th>
-                  <th>Name</th>
-                  <th>Class</th>
-                  <th>Fee</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr><td colSpan="5" style={{ textAlign: "center", padding: "2.5rem", color: "var(--muted)" }}>No students found.</td></tr>
-                ) : filtered.map(s => {
-                  const st = (s.status || "unpaid").toLowerCase();
-                  const badge = STATUS_COLOR[st] || STATUS_COLOR.unpaid;
-                  return (
-                    <tr key={s.studentId}>
-                      <td style={{ color: "var(--muted)", fontFamily: "monospace" }}>{s.studentId}</td>
-                      <td style={{ fontWeight: 500 }}>{s.name}</td>
-                      <td>{s.class}</td>
-                      <td>{s.feeAmount} XLM</td>
-                      <td>
-                        <span className="status-badge" style={badge}>{st}</span>
-                      </td>
+            <div className="table-wrap">
+              {studentsLoading ? (
+                <div style={{ padding: "2rem", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>Loading…</div>
+              ) : (
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th>Student ID</th>
+                      <th>Name</th>
+                      <th>Class</th>
+                      <th>Fee</th>
+                      <th>Status</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr><td colSpan="5" style={{ textAlign: "center", padding: "2.5rem", color: "var(--muted)" }}>No students found.</td></tr>
+                    ) : filtered.map(s => {
+                      const st = (s.status || "unpaid").toLowerCase();
+                      const badge = STATUS_COLOR[st] || STATUS_COLOR.unpaid;
+                      return (
+                        <tr key={s.studentId}>
+                          <td style={{ color: "var(--muted)", fontFamily: "monospace" }}>{s.studentId}</td>
+                          <td style={{ fontWeight: 500 }}>{s.name}</td>
+                          <td>{s.class}</td>
+                          <td>{s.feeAmount} XLM</td>
+                          <td>
+                            <span className="status-badge" style={badge}>{st}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
-        </div>
+        </ErrorBoundary>
 
         {/* Pagination */}
         {pages > 1 && (
