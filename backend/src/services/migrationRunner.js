@@ -53,9 +53,64 @@ async function runMigrations(_require = require) {
 
     // We won the lock — run the migration.
     console.log(`[Migration] Running: ${migration.version}`);
-    await migration.up();
+    try {
+      await migration.up();
+    } catch (err) {
+      // Remove the lock document so the migration is not silently skipped on
+      // the next run — the operator must fix the migration and redeploy.
+      await Migration.deleteOne({ version: migration.version });
+      throw err;
+    }
+    await Migration.findOneAndUpdate(
+      { version: migration.version },
+      { $set: { appliedAt: new Date() } }
+    );
     console.log(`[Migration] Applied: ${migration.version}`);
   }
 }
 
-module.exports = { runMigrations };
+/**
+ * Roll back the last applied migration.
+ *
+ * Finds the most recently applied Migration record, loads the corresponding
+ * file, calls its down() function, then removes the record so the migration
+ * can be re-applied later.
+ *
+ * @param {Function} [_require] - injectable require for testing
+ */
+async function rollback(_require = require) {
+  const last = await Migration.findOne({ appliedAt: { $exists: true } })
+    .sort({ appliedAt: -1 });
+
+  if (!last) {
+    console.log('[Migration] Nothing to roll back.');
+    return;
+  }
+
+  // Find the matching file by version string
+  const files = fs.existsSync(MIGRATIONS_DIR)
+    ? fs.readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith('.js'))
+    : [];
+
+  const file = files.find(f => {
+    const m = _require(path.join(MIGRATIONS_DIR, f));
+    return m.version === last.version;
+  });
+
+  if (!file) {
+    throw new Error(`[Migration] File for version "${last.version}" not found.`);
+  }
+
+  const migration = _require(path.join(MIGRATIONS_DIR, file));
+
+  if (typeof migration.down !== 'function') {
+    throw new Error(`[Migration] "${last.version}" does not export a down() function.`);
+  }
+
+  console.log(`[Migration] Rolling back: ${last.version}`);
+  await migration.down();
+  await Migration.deleteOne({ version: last.version });
+  console.log(`[Migration] Rolled back: ${last.version}`);
+}
+
+module.exports = { runMigrations, rollback };

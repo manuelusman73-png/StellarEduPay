@@ -14,4 +14,9 @@ module.exports = {
       [{ $set: { remainingBalance: { $subtract: ['$feeAmount', '$totalPaid'] } } }]
     );
   },
+
+  async down() {
+    const Student = mongoose.model('Student');
+    await Student.updateMany({}, { $set: { remainingBalance: null } });
+  },
 };

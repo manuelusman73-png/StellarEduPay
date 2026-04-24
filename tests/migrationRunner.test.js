@@ -3,9 +3,13 @@ const path = require('path');
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockFindOneAndUpdate = jest.fn();
+const mockFindOne = jest.fn();
+const mockDeleteOne = jest.fn();
 
 jest.mock('../backend/src/models/migrationModel', () => ({
   findOneAndUpdate: (...args) => mockFindOneAndUpdate(...args),
+  findOne: (...args) => mockFindOne(...args),
+  deleteOne: (...args) => mockDeleteOne(...args),
 }));
 
 jest.mock('fs', () => ({
@@ -15,7 +19,7 @@ jest.mock('fs', () => ({
 
 let mockFiles = [];
 
-const { runMigrations } = require('../backend/src/services/migrationRunner');
+const { runMigrations, rollback } = require('../backend/src/services/migrationRunner');
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '../backend/migrations');
 
@@ -42,6 +46,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   // Default: lock is always available
   mockFindOneAndUpdate.mockResolvedValue(LOCK_ACQUIRED);
+  mockDeleteOne.mockResolvedValue({});
 });
 
 describe('runMigrations — distributed locking', () => {
@@ -146,5 +151,64 @@ describe('runMigrations — distributed locking', () => {
     mockFiles = [];
     await runMigrations(makeRequire([]));
     expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('runMigrations — failed up cleans up lock', () => {
+  test('deletes the lock document when up() throws so the migration is not skipped on retry', async () => {
+    const up = jest.fn().mockRejectedValue(new Error('up failed'));
+    const files = [{ name: '001_test.js', module: { version: '001_test', up } }];
+    mockFiles = files.map(f => f.name);
+
+    await expect(runMigrations(makeRequire(files))).rejects.toThrow('up failed');
+
+    expect(mockDeleteOne).toHaveBeenCalledWith({ version: '001_test' });
+  });
+});
+
+describe('rollback', () => {
+  test('calls down() of the last applied migration and deletes its record', async () => {
+    const down = jest.fn().mockResolvedValue();
+    const files = [{ name: '001_test.js', module: { version: '001_test', up: jest.fn(), down } }];
+    mockFiles = files.map(f => f.name);
+
+    // Simulate findOne().sort() chain returning the last applied migration
+    mockFindOne.mockReturnValue({
+      sort: jest.fn().mockResolvedValue({ version: '001_test', appliedAt: new Date() }),
+    });
+
+    await rollback(makeRequire(files));
+
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(mockDeleteOne).toHaveBeenCalledWith({ version: '001_test' });
+  });
+
+  test('does nothing when no migrations have been applied', async () => {
+    mockFindOne.mockReturnValue({ sort: jest.fn().mockResolvedValue(null) });
+
+    await rollback(makeRequire([])); // should not throw
+
+    expect(mockDeleteOne).not.toHaveBeenCalled();
+  });
+
+  test('throws when the migration file has no down() function', async () => {
+    const files = [{ name: '001_test.js', module: { version: '001_test', up: jest.fn() } }];
+    mockFiles = files.map(f => f.name);
+
+    mockFindOne.mockReturnValue({
+      sort: jest.fn().mockResolvedValue({ version: '001_test', appliedAt: new Date() }),
+    });
+
+    await expect(rollback(makeRequire(files))).rejects.toThrow(/down/);
+  });
+
+  test('throws when the migration file for the last version cannot be found', async () => {
+    mockFiles = []; // no files on disk
+
+    mockFindOne.mockReturnValue({
+      sort: jest.fn().mockResolvedValue({ version: '001_missing', appliedAt: new Date() }),
+    });
+
+    await expect(rollback(makeRequire([]))).rejects.toThrow(/not found/);
   });
 });
