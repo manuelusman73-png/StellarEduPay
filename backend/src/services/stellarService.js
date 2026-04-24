@@ -287,12 +287,17 @@ async function verifyTransaction(txHash, walletAddress) {
 
 /**
  * Fetch recent transactions for a specific school wallet and record new payments.
+ * Paginates through ALL transactions (200 per page) until an already-processed
+ * transaction is encountered, ensuring no payments are missed after downtime.
  *
  * @param {object} school - School document with { schoolId, stellarAddress }
  */
 async function syncPaymentsForSchool(school) {
   const { schoolId, stellarAddress } = school;
 
+  // Fetch up to 200 transactions per page (Horizon API maximum).
+  // Pagination continues until we hit an already-recorded transaction or
+  // exhaust all pages — fixing the previous limit(20) single-fetch bug.
   let page = await withStellarRetry(
     () =>
       server
