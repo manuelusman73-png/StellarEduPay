@@ -269,21 +269,32 @@ const STUDENT_ID_RE = /^[A-Za-z0-9_-]{3,20}$/;
 
 function validateStudentRow(row) {
   const errors = [];
-  if (!row.studentId || !STUDENT_ID_RE.test(row.studentId)) {
-    errors.push('studentId must be 3–20 alphanumeric characters');
+
+  // studentId: required, must match pattern
+  if (!row.studentId || typeof row.studentId !== 'string' || !row.studentId.trim()) {
+    errors.push('studentId is required');
+  } else if (!STUDENT_ID_RE.test(row.studentId.trim())) {
+    errors.push('studentId must be 3–20 alphanumeric characters (letters, digits, _ or -)');
   }
+
+  // name: required, non-empty string
   if (!row.name || typeof row.name !== 'string' || !row.name.trim()) {
     errors.push('name is required');
   }
+
+  // class: required, non-empty string
   if (!row.class || typeof row.class !== 'string' || !row.class.trim()) {
     errors.push('class is required');
   }
+
+  // feeAmount: optional, but if provided must be a positive number
   if (row.feeAmount != null && row.feeAmount !== '') {
     const n = Number(row.feeAmount);
     if (!Number.isFinite(n) || n <= 0) {
       errors.push('feeAmount must be a positive number');
     }
   }
+
   return errors;
 }
 
