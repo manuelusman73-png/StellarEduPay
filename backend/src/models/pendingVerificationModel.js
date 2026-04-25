@@ -30,6 +30,10 @@ const pendingVerificationSchema = new mongoose.Schema(
 pendingVerificationSchema.index({ schoolId: 1, status: 1, nextRetryAt: 1 });
 // Retry worker: find pending items ready for retry
 pendingVerificationSchema.index({ status: 1, nextRetryAt: 1 });
+// Efficient retry worker queries: filter by due time and attempt count
+pendingVerificationSchema.index({ nextRetryAt: 1, attempts: 1 });
+// Multi-school filtering by due time
+pendingVerificationSchema.index({ schoolId: 1, nextRetryAt: 1 });
 
 module.exports = mongoose.model(
   "PendingVerification",
