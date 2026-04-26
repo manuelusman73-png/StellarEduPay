@@ -178,7 +178,21 @@ async function updateStudent(req, res, next) {
 
     const update = {};
     if (name !== undefined) update.name = name;
-    if (className !== undefined) update.class = className;
+    if (className !== undefined) {
+      update.class = className;
+      // When the class changes, sync feeAmount from the new class fee structure
+      // unless the caller explicitly provides a feeAmount override.
+      if (feeAmount === undefined) {
+        const feeStructure = await FeeStructure.findOne({ schoolId: req.schoolId, className, isActive: true });
+        if (!feeStructure) {
+          const err = new Error(`No active fee structure found for class "${className}"`);
+          err.code = 'NO_FEE_STRUCTURE';
+          err.status = 400;
+          return next(err);
+        }
+        update.feeAmount = feeStructure.feeAmount;
+      }
+    }
     if (feeAmount !== undefined) update.feeAmount = feeAmount;
 
     const student = await Student.findOneAndUpdate(
