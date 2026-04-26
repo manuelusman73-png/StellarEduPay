@@ -1,25 +1,23 @@
 'use strict';
 
 // #468 — webhook HMAC-SHA256 signature
-// Tests generateSignature, verifySignature, and fireWebhook directly.
 
 const crypto = require('crypto');
 
-// Mock the webhookRetryModel before requiring the service
 jest.mock('../backend/src/models/webhookRetryModel', () => ({
   create: jest.fn().mockResolvedValue({}),
   find: jest.fn().mockResolvedValue([]),
   updateOne: jest.fn().mockResolvedValue({}),
 }));
 
-// Provide a controllable axios mock at the top level (hoisted by Jest)
-const mockAxiosPost = jest.fn().mockResolvedValue({ status: 200 });
-jest.mock('axios', () => ({ post: mockAxiosPost }), { virtual: true });
-
 // ─── Load service after mocks ─────────────────────────────────────────────────
 
 const { generateSignature, verifySignature, fireWebhook } = require('../backend/src/services/webhookService');
 const WebhookRetry = require('../backend/src/models/webhookRetryModel');
+
+// Intercept axios.post on the instance the service already loaded
+const axios = require('axios');
+const mockAxiosPost = jest.spyOn(axios, 'post');
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +31,10 @@ describe('#468 webhook HMAC signature', () => {
     mockAxiosPost.mockClear();
     mockAxiosPost.mockResolvedValue({ status: 200 });
     WebhookRetry.create.mockClear();
+  });
+
+  afterAll(() => {
+    mockAxiosPost.mockRestore();
   });
 
   describe('generateSignature', () => {
@@ -89,7 +91,6 @@ describe('#468 webhook HMAC signature', () => {
       const headerValue = config.headers['X-StellarEduPay-Signature'];
       expect(headerValue).toMatch(/^sha256=[0-9a-f]+$/);
 
-      // Verify the signature is correct
       const expectedSig = `sha256=${generateSignature(body, SECRET)}`;
       expect(headerValue).toBe(expectedSig);
     });
@@ -114,7 +115,6 @@ describe('#468 webhook HMAC signature', () => {
 
       expect(result.success).toBe(false);
       expect(result.queued).toBe(true);
-      // Secret should be stored in the retry record so re-delivery can be signed
       expect(WebhookRetry.create).toHaveBeenCalledWith(
         expect.objectContaining({ secret: SECRET }),
       );
