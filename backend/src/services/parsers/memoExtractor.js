@@ -26,7 +26,7 @@ function extractMemo(tx) {
       };
     }
 
-    // Handle string memo (most common case)
+    // Handle string memo (most common case) — only MEMO_TEXT is valid
     if (typeof tx.memo === 'string') {
       const trimmedMemo = tx.memo.trim();
       return {
@@ -69,6 +69,8 @@ function extractMemo(tx) {
 
 /**
  * Extract memo based on type (TEXT, ID, HASH, RETURN)
+ * Only MEMO_TEXT is accepted for student ID matching.
+ * MEMO_HASH and MEMO_RETURN are rejected to prevent accidental matching.
  * @param {object} memoData - Raw memo data from transaction
  * @returns {ExtractedMemo} Processed memo with type and content
  */
@@ -88,8 +90,10 @@ function extractByType(memoData) {
 
     case 'id':
     case 'MEMO_ID':
+      // MEMO_ID is not supported for student ID matching
+      logger.warn('MEMO_ID type not supported for payment matching', { memoValue });
       return {
-        content: memoValue ? String(memoValue) : null,
+        content: null,
         type: 'MEMO_ID',
         raw: memoData,
         encoding: null
@@ -97,8 +101,10 @@ function extractByType(memoData) {
 
     case 'hash':
     case 'MEMO_HASH':
+      // MEMO_HASH is not supported — could contain arbitrary bytes
+      logger.warn('MEMO_HASH type not supported for payment matching', { memoValue });
       return {
-        content: memoValue ? decodeMemo(memoValue, 'hex') : null,
+        content: null,
         type: 'MEMO_HASH',
         raw: memoData,
         encoding: 'hex'
@@ -106,8 +112,10 @@ function extractByType(memoData) {
 
     case 'return':
     case 'MEMO_RETURN':
+      // MEMO_RETURN is not supported — 32-byte hash for return payments
+      logger.warn('MEMO_RETURN type not supported for payment matching', { memoValue });
       return {
-        content: memoValue ? decodeMemo(memoValue, 'hex') : null,
+        content: null,
         type: 'MEMO_RETURN',
         raw: memoData,
         encoding: 'hex'
@@ -116,7 +124,7 @@ function extractByType(memoData) {
     default:
       logger.warn('Unknown memo type', { memoType, memoData });
       return {
-        content: memoValue ? String(memoValue) : null,
+        content: null,
         type: 'UNKNOWN',
         raw: memoData,
         encoding: null

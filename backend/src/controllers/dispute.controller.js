@@ -10,6 +10,18 @@ async function flagDispute(req, res, next) {
     if (!txHash || !studentId || !raisedBy || !reason) {
       return res.status(400).json({ error: 'txHash, studentId, raisedBy, and reason are all required.', code: 'VALIDATION_ERROR' });
     }
+    
+    // Validate field lengths
+    const raisedByTrimmed = raisedBy.trim();
+    const reasonTrimmed = reason.trim();
+    
+    if (raisedByTrimmed.length > 200) {
+      return res.status(400).json({ error: 'raisedBy must not exceed 200 characters.', code: 'VALIDATION_ERROR' });
+    }
+    if (reasonTrimmed.length > 1000) {
+      return res.status(400).json({ error: 'reason must not exceed 1000 characters.', code: 'VALIDATION_ERROR' });
+    }
+    
     const payment = await Payment.findOne({ txHash, schoolId });
     if (!payment) {
       return res.status(404).json({ error: 'Payment not found for this school.', code: 'NOT_FOUND' });
@@ -18,7 +30,7 @@ async function flagDispute(req, res, next) {
     if (existing) {
       return res.status(409).json({ error: 'An active dispute already exists for this payment.', code: 'DISPUTE_ALREADY_EXISTS', disputeId: existing._id });
     }
-    const dispute = await Dispute.create({ schoolId, txHash, studentId, raisedBy: raisedBy.trim(), reason: reason.trim(), status: 'open' });
+    const dispute = await Dispute.create({ schoolId, txHash, studentId, raisedBy: raisedByTrimmed, reason: reasonTrimmed, status: 'open' });
     res.status(201).json(dispute);
   } catch (err) { next(err); }
 }
@@ -51,16 +63,28 @@ async function getDisputeById(req, res, next) {
 
 async function resolveDispute(req, res, next) {
   try {
-    const { schoolId } = req;
-    const { resolvedBy, resolutionNote, status } = req.body;
-    if (!resolvedBy || !resolutionNote) {
-      return res.status(400).json({ error: 'resolvedBy and resolutionNote are required.', code: 'VALIDATION_ERROR' });
+    const { schoolId, user } = req;
+    const { resolutionNote, status } = req.body;
+    
+    // Extract admin identifier from authenticated user (JWT payload)
+    const resolvedBy = user?.email || user?.id || user?.sub || 'admin';
+    
+    if (!resolutionNote) {
+      return res.status(400).json({ error: 'resolutionNote is required.', code: 'VALIDATION_ERROR' });
     }
+    
+    // Validate field lengths
+    const resolutionNoteTrimmed = resolutionNote.trim();
+    
+    if (resolutionNoteTrimmed.length > 1000) {
+      return res.status(400).json({ error: 'resolutionNote must not exceed 1000 characters.', code: 'VALIDATION_ERROR' });
+    }
+    
     const ALLOWED = ['resolved', 'rejected', 'under_review'];
     const newStatus = status && ALLOWED.includes(status) ? status : 'resolved';
     const dispute = await Dispute.findOneAndUpdate(
       { _id: req.params.id, schoolId, status: { $in: ['open', 'under_review'] } },
-      { $set: { status: newStatus, resolvedBy: resolvedBy.trim(), resolutionNote: resolutionNote.trim(), resolvedAt: ['resolved', 'rejected'].includes(newStatus) ? new Date() : null } },
+      { $set: { status: newStatus, resolvedBy, resolutionNote: resolutionNoteTrimmed, resolvedAt: ['resolved', 'rejected'].includes(newStatus) ? new Date() : null } },
       { new: true }
     );
     if (!dispute) return res.status(404).json({ error: 'Dispute not found or already closed.', code: 'NOT_FOUND' });

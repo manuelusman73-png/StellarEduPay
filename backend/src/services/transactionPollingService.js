@@ -1,5 +1,6 @@
 'use strict';
 
+const mongoose = require('mongoose');
 const School = require('../models/schoolModel');
 const Payment = require('../models/paymentModel');
 const Student = require('../models/studentModel');
@@ -115,20 +116,24 @@ async function processTransaction(tx, school) {
     networkFee,
   };
 
+  const session = await mongoose.connection.startSession();
   try {
-    await Payment.create(paymentData);
-    
-    // Update student balance if confirmed and not suspicious
-    if (isConfirmed && !isSuspicious) {
-      await Student.findOneAndUpdate(
-        { schoolId, studentId: memo },
-        {
-          totalPaid: cumulativeTotal,
-          remainingBalance: Math.max(0, remaining),
-          feePaid: cumulativeTotal >= student.feeAmount,
-        }
-      );
-    }
+    await session.withTransaction(async () => {
+      await Payment.create([paymentData], { session });
+
+      // Atomically update student balance if confirmed and not suspicious
+      if (isConfirmed && !isSuspicious) {
+        await Student.findOneAndUpdate(
+          { schoolId, studentId: memo },
+          {
+            totalPaid: cumulativeTotal,
+            remainingBalance: Math.max(0, remaining),
+            feePaid: cumulativeTotal >= student.feeAmount,
+          },
+          { session }
+        );
+      }
+    });
 
     sseEmit(schoolId, 'payment', {
       txHash: tx.hash,
@@ -156,6 +161,8 @@ async function processTransaction(tx, school) {
     }
     logger.error('Failed to record payment', { error: error.message, txHash: tx.hash });
     throw error;
+  } finally {
+    await session.endSession();
   }
 }
 

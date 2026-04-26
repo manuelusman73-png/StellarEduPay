@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "scripts": {
     "test": "jest --testPathPattern=tests/ --forceExit",
+    "test:integration": "cross-env RUN_INTEGRATION_TESTS=true jest tests/stellar.integration.test.js --forceExit",
     "seed": "node scripts/seed-test-data.js"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "dotenv": "^17.3.1",
     "jest": "^29.0.0",
     "mongoose": "^9.3.1",
@@ -15,6 +17,10 @@
     "moduleDirectories": [
       "node_modules",
       "backend/node_modules"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "tests/stellar\\.integration\\.test\\.js"
     ]
   },
   "dependencies": {

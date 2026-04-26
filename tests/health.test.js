@@ -2,7 +2,7 @@
 
 // Must set required env vars before app is loaded (config/index.js validates on require)
 process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-process.env.SCHOOL_WALLET_ADDRESS = 'GTEST123';
+process.env.SCHOOL_WALLET_ADDRESS = 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B';
 
 const request = require('supertest');
 

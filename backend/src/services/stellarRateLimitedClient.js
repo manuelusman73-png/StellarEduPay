@@ -2,24 +2,73 @@
 
 /**
  * Rate-Limited Stellar API Client
- * 
+ *
  * A production-ready Stellar API client with:
  * - Request throttling using Bottleneck
+ * - Distributed rate limit state via Redis (ioredis) when REDIS_HOST is set,
+ *   so all horizontally-scaled Node.js processes share a single counter and
+ *   the combined request rate never exceeds Horizon's actual limit.
+ * - Automatic in-memory fallback when Redis is unavailable (single-instance mode)
  * - Queue system for outgoing requests
  * - Retry mechanism with exponential backoff
  * - Graceful handling of HTTP 429 (rate limit) errors
  * - Configurable rate limits via environment variables
  * - Comprehensive logging for request flow
- * - In-memory queue fallback when Redis is unavailable
- * 
+ *
+ * Multi-instance note:
+ *   Set REDIS_HOST (and optionally REDIS_PORT / REDIS_PASSWORD) to enable
+ *   distributed rate limiting.  Without Redis every process maintains its own
+ *   independent counter, which can cause the combined rate to exceed Horizon's
+ *   limit when running more than one instance.
+ *
  * @author StellarEduPay Team
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 const Bottleneck = require('bottleneck');
 const { Server, Networks, Asset, Keypair, TransactionBuilder, Operation } = require('@stellar/stellar-sdk');
 const config = require('../config');
 const logger = require('../utils/logger');
+
+// Redis connection is optional – only required for distributed mode.
+let IORedisConnection;
+try {
+  // Bottleneck ships its own IORedisConnection wrapper that accepts an ioredis client.
+  IORedisConnection = require('bottleneck/lib/IORedisConnection.js');
+} catch (_) {
+  // Older Bottleneck builds expose it differently; fall back gracefully.
+  IORedisConnection = null;
+}
+
+/**
+ * Build an ioredis client from environment variables.
+ * Returns null when REDIS_HOST is not configured.
+ */
+function _createRedisClient() {
+  if (!process.env.REDIS_HOST) return null;
+
+  try {
+    const Redis = require('ioredis');
+    const client = new Redis({
+      host: process.env.REDIS_HOST,
+      port: parseInt(process.env.REDIS_PORT) || 6379,
+      password: process.env.REDIS_PASSWORD || undefined,
+      // Fail fast on connection errors so we can fall back to in-memory.
+      enableOfflineQueue: false,
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+    });
+
+    client.on('error', (err) => {
+      logger.warn('[StellarRateLimitedClient] Redis error – falling back to in-memory limiter:', err.message);
+    });
+
+    return client;
+  } catch (err) {
+    logger.warn('[StellarRateLimitedClient] Could not create Redis client:', err.message);
+    return null;
+  }
+}
 
 /**
  * Rate Limit Configuration
@@ -197,35 +246,74 @@ class StellarRateLimitedClient {
       ),
       ...RATE_LIMIT_CONFIG,
     };
-    
+
     // Initialize SDK server
     this.server = new Server(this.config.horizonUrl);
-    
+
     // Initialize request queue
     this.requestQueue = new RequestQueue({
       maxSize: options.maxQueueSize || RATE_LIMIT_CONFIG.HIGH_WATER,
       burstWindow: RATE_LIMIT_CONFIG.BURST_WINDOW,
       burstAllowance: RATE_LIMIT_CONFIG.BURST_ALLOWANCE,
     });
-    
-    // Initialize Bottleneck rate limiter
-    this.limiter = new Bottleneck({
+
+    // ── Distributed rate limiting via Redis ──────────────────────────────
+    // When REDIS_HOST is configured we share the Bottleneck state across all
+    // Node.js processes/containers so the combined request rate never exceeds
+    // Horizon's actual limit.  Without Redis each process is independent
+    // (single-instance / development mode).
+    this._redisClient = options.redisClient !== undefined
+      ? options.redisClient   // allow injection for tests
+      : _createRedisClient();
+
+    this._usingRedis = false;
+
+    const bottleneckOpts = {
       minTime: this.config.MIN_TIME,
       maxConcurrent: this.config.MAX_CONCURRENT,
       highWater: this.config.HIGH_WATER,
       strategy: this.config.STRATEGY,
-    });
-    
+    };
+
+    if (this._redisClient && IORedisConnection) {
+      try {
+        // Shared datastore key so all instances coordinate on the same bucket.
+        const datastoreId = options.datastoreId || 'stellar-rate-limiter';
+        this.limiter = new Bottleneck({
+          ...bottleneckOpts,
+          id: datastoreId,
+          datastore: 'ioredis',
+          clearDatastore: false,
+          clientOptions: {},   // unused when connection is provided directly
+          // Bottleneck accepts a pre-built IORedisConnection
+          connection: new IORedisConnection({ client: this._redisClient }),
+        });
+        this._usingRedis = true;
+        logger.info('[StellarRateLimitedClient] Using Redis-backed distributed rate limiter (id: ' + datastoreId + ')');
+      } catch (err) {
+        logger.warn('[StellarRateLimitedClient] Failed to init Redis limiter, falling back to in-memory:', err.message);
+        this.limiter = new Bottleneck(bottleneckOpts);
+      }
+    } else {
+      if (process.env.REDIS_HOST) {
+        logger.warn('[StellarRateLimitedClient] REDIS_HOST is set but IORedisConnection is unavailable – using in-memory limiter. Rate limit state will NOT be shared across processes.');
+      } else {
+        logger.info('[StellarRateLimitedClient] No REDIS_HOST configured – using in-memory rate limiter (single-instance mode).');
+      }
+      this.limiter = new Bottleneck(bottleneckOpts);
+    }
+
     // Setup Bottleneck events
     this._setupLimiterEvents();
-    
+
     // Track rate limit status
     this.rateLimitStatus = {
       remaining: this.config.HORIZON_RATE_LIMIT,
       resetAt: Date.now() + this.config.HORIZON_RATE_LIMIT_WINDOW,
       lastUpdated: Date.now(),
+      distributed: this._usingRedis,
     };
-    
+
     // Statistics
     this.stats = {
       totalRequests: 0,
@@ -234,12 +322,13 @@ class StellarRateLimitedClient {
       retriedRequests: 0,
       rateLimitedRequests: 0,
     };
-    
+
     logger.info('[StellarRateLimitedClient] Initialized with config:', {
       horizonUrl: this.config.horizonUrl,
       minTime: this.config.MIN_TIME,
       maxConcurrent: this.config.MAX_CONCURRENT,
       retryMaxAttempts: this.config.RETRY_MAX_ATTEMPTS,
+      distributedMode: this._usingRedis,
     });
   }
 
@@ -684,6 +773,7 @@ class StellarRateLimitedClient {
       ...this.stats,
       queue: this.requestQueue.getStats(),
       rateLimit: this.rateLimitStatus,
+      distributed: this._usingRedis,
       limiter: {
         queued: this.limiter.queued(),
         running: this.limiter.running(),
@@ -747,18 +837,27 @@ class StellarRateLimitedClient {
    */
   async disconnect() {
     logger.info('[StellarRateLimitedClient] Disconnecting...');
-    
+
     // Stop accepting new requests
     this.limiter.stop();
-    
+
     // Wait for pending requests
     const timeout = 30000; // 30 seconds
     const startTime = Date.now();
-    
+
     while (this.limiter.running() > 0 && Date.now() - startTime < timeout) {
       await this._sleep(100);
     }
-    
+
+    // Close Redis connection if we opened one
+    if (this._usingRedis && this._redisClient) {
+      try {
+        await this._redisClient.quit();
+      } catch (_) {
+        // ignore errors during shutdown
+      }
+    }
+
     logger.info('[StellarRateLimitedClient] Disconnected');
   }
 }

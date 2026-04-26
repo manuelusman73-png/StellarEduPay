@@ -11,11 +11,13 @@ const networkPassphrase = config.IS_TESTNET
   ? StellarSdk.Networks.TESTNET
   : StellarSdk.Networks.PUBLIC;
 
-const SCHOOL_WALLET = config.SCHOOL_WALLET_ADDRESS;
+// In multi-school setup, SCHOOL_WALLET_ADDRESS is optional (only used for migration)
+// Each school has its own stellarAddress in the database
+const SCHOOL_WALLET = config.SCHOOL_WALLET_ADDRESS || null;
 
-if (!SCHOOL_WALLET || !StellarSdk.StrKey.isValidEd25519PublicKey(SCHOOL_WALLET)) {
+if (SCHOOL_WALLET && !StellarSdk.StrKey.isValidEd25519PublicKey(SCHOOL_WALLET)) {
   throw new Error(
-    `[Config] SCHOOL_WALLET_ADDRESS is ${SCHOOL_WALLET ? 'invalid' : 'missing'}. ` +
+    `[Config] SCHOOL_WALLET_ADDRESS is invalid. ` +
     'Provide a valid Stellar public key (starts with G).'
   );
 }

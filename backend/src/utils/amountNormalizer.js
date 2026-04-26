@@ -24,6 +24,14 @@ try {
     throw new Error('Missing required dependency: decimal.js');
 }
 
+// Load central config for USDC issuer
+let centralConfig;
+try {
+    centralConfig = require('./../../src/config');
+} catch (error) {
+    centralConfig = null;
+}
+
 // Configuration defaults for Stellar network
 const DEFAULT_CONFIG = {
     // XLM: 1 XLM = 10^7 stroops
@@ -40,7 +48,7 @@ const DEFAULT_CONFIG = {
     // USDC on Stellar - same precision as XLM
     'USDC': {
         code: 'USDC',
-        issuer: 'GCZNF24HPMYTV6NOEHI7Q5RJFFUI23JKUKY3H3TRQCGAD456P4DQ3XPS',
+        issuer: centralConfig?.USDC_ISSUER || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5', // Use config, fallback to testnet
         decimals: 7,
         displayDecimals: 7,
         baseUnit: 'micro-USDC',
@@ -48,22 +56,16 @@ const DEFAULT_CONFIG = {
         maxAmount: '100000000000',
         minAmount: '0.0000001'
     },
-    // EURT on Stellar
-    'EURT': {
-        code: 'EURT',
-        issuer: 'GAP5LETOV6YIE62YAMFVSTD3UK2WXKMER2LA3SKYFJ3AH24B55M3X4D',
-        decimals: 7,
-        displayDecimals: 7,
-        baseUnit: 'micro-EURT',
-        displayUnit: 'EURT',
-        maxAmount: '100000000000',
-        minAmount: '0.0000001'
-    }
 };
 
 // Load configuration from environment variables
 function loadConfig() {
     const config = { ...DEFAULT_CONFIG };
+    
+    // Update USDC issuer from central config if available
+    if (centralConfig?.USDC_ISSUER && config.USDC) {
+        config.USDC.issuer = centralConfig.USDC_ISSUER;
+    }
     
     // Allow environment variable overrides
     if (process.env.AMOUNT_NORMALIZER_CONFIG) {

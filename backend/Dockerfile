@@ -1,5 +1,8 @@
 FROM node:18-alpine
 
+# Install wget for health checks
+RUN apk add --no-cache wget
+
 # Create a non-root user to run the app
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
@@ -22,4 +25,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:5000/health || exit 1
 
-CMD ["node", "src/app.js"]
+CMD ["npm", "start"]

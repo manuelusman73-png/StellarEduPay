@@ -6,10 +6,35 @@
  * Sends fee reminder emails to parents via SMTP (nodemailer).
  * Falls back to console logging when SMTP is not configured — useful
  * for development and environments without email infrastructure.
+ *
+ * Email bodies are loaded from:
+ *   backend/src/templates/reminderEmail.txt  (plain-text)
+ *   backend/src/templates/reminderEmail.html (HTML)
+ *
+ * Supported placeholders: {{studentName}}, {{studentId}}, {{className}},
+ * {{schoolName}}, {{feeAmount}}, {{outstanding}}, {{reminderNote}}
+ * The {{#if reminderNote}}…{{/if}} block is stripped when reminderNote is empty.
  */
 
+const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger').child('NotificationService');
+
+const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
+
+function loadTemplate(filename) {
+  return fs.readFileSync(path.join(TEMPLATES_DIR, filename), 'utf8');
+}
+
+function renderTemplate(template, vars) {
+  // Replace {{#if key}}…{{/if}} blocks — include content only when key is truthy
+  let out = template.replace(/\{\{#if (\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (_, key, inner) =>
+    vars[key] ? inner : ''
+  );
+  // Replace {{key}} placeholders
+  return out.replace(/\{\{(\w+)\}\}/g, (_, key) => (vars[key] != null ? vars[key] : ''));
+}
 
 let _transporter = null;
 
@@ -49,41 +74,19 @@ function getTransporter() {
 }
 
 /**
- * Build the reminder email body.
+ * Build the reminder email body from external template files.
  */
 function buildReminderEmail({ studentName, studentId, className, feeAmount, remainingBalance, schoolName, reminderCount }) {
   const outstanding = remainingBalance != null ? remainingBalance : feeAmount;
   const subject = `[${schoolName}] Fee Payment Reminder — ${studentName}`;
+  const reminderNote = reminderCount > 1
+    ? `Note: This is reminder #${reminderCount}. If you have already paid, please disregard this message.`
+    : '';
 
-  const text = [
-    `Dear Parent/Guardian,`,
-    ``,
-    `This is a reminder that school fees for ${studentName} (ID: ${studentId}, Class: ${className}) are outstanding.`,
-    ``,
-    `  School       : ${schoolName}`,
-    `  Fee Amount   : ${feeAmount}`,
-    `  Amount Due   : ${outstanding}`,
-    ``,
-    `Please arrange payment at your earliest convenience to avoid any disruption to your child's education.`,
-    ``,
-    reminderCount > 1 ? `Note: This is reminder #${reminderCount}. If you have already paid, please disregard this message.` : '',
-    ``,
-    `Thank you,`,
-    `${schoolName} Administration`,
-  ].filter(line => line !== undefined).join('\n');
+  const vars = { studentName, studentId, className, feeAmount, outstanding, schoolName, reminderNote };
 
-  const html = `
-    <p>Dear Parent/Guardian,</p>
-    <p>This is a reminder that school fees for <strong>${studentName}</strong> (ID: <code>${studentId}</code>, Class: <strong>${className}</strong>) are outstanding.</p>
-    <table style="border-collapse:collapse;margin:16px 0;">
-      <tr><td style="padding:4px 12px 4px 0;color:#555;">School</td><td><strong>${schoolName}</strong></td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#555;">Fee Amount</td><td>${feeAmount}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;color:#555;">Amount Due</td><td><strong>${outstanding}</strong></td></tr>
-    </table>
-    <p>Please arrange payment at your earliest convenience to avoid any disruption to your child's education.</p>
-    ${reminderCount > 1 ? `<p><em>Note: This is reminder #${reminderCount}. If you have already paid, please disregard this message.</em></p>` : ''}
-    <p>Thank you,<br/><strong>${schoolName} Administration</strong></p>
-  `;
+  const text = renderTemplate(loadTemplate('reminderEmail.txt'), vars);
+  const html = renderTemplate(loadTemplate('reminderEmail.html'), vars);
 
   return { subject, text, html };
 }

@@ -20,7 +20,9 @@ All error responses follow the [Error Responses](#error-responses) format.
 - [Reminders](#reminders)
 - [Retry Queue](#retry-queue)
 - [Health Check](#health-check)
+- [Admin](#admin)
 - [Error Responses](#error-responses)
+- [Fee Adjustment Rules](#fee-adjustment-rules)
 
 ---
 
@@ -77,10 +79,23 @@ HTTP 400
 ```
 GET /api/schools
 ```
+Returns only active schools by default.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `includeInactive` | boolean | `false` | If `true`, returns all schools including inactive. Requires admin auth. |
+
 **Response `200`**
 ```json
 [{ "schoolId": "SCH-3F2A", "name": "Lincoln High", "slug": "lincoln-high", "stellarAddress": "G...", "network": "testnet", "isActive": true }]
 ```
+
+**Errors (when `?includeInactive=true`)**
+- `401 MISSING_AUTH_TOKEN` — no Bearer token provided
+- `401 INVALID_AUTH_TOKEN` — token is invalid or expired
+- `403 INSUFFICIENT_ROLE` — token does not have admin role
 
 ### Get a school
 ```
@@ -123,6 +138,32 @@ Authorization: Bearer <token>
 { "message": "School deactivated" }
 ```
 
+### Deactivate a school (explicit endpoint) — admin only
+```
+PATCH /api/schools/:schoolId/deactivate
+Authorization: Bearer <token>
+```
+Sets `isActive: false`. Deactivated schools are excluded from `GET /api/schools` by default and all payment operations return `404 SCHOOL_NOT_FOUND` via the school context middleware.
+
+**Response `200`**
+```json
+{ "message": "School \"Lincoln High\" deactivated", "schoolId": "SCH-3F2A", "isActive": false }
+```
+**Errors** — `404 NOT_FOUND` if school does not exist.
+
+### Reactivate a school — admin only
+```
+PATCH /api/schools/:schoolId/activate
+Authorization: Bearer <token>
+```
+Sets `isActive: true`. The school immediately becomes visible in `GET /api/schools` and accepts payment operations again.
+
+**Response `200`**
+```json
+{ "message": "School \"Lincoln High\" activated", "schoolId": "SCH-3F2A", "isActive": true }
+```
+**Errors** — `404 NOT_FOUND` if school does not exist.
+
 ---
 
 ## Students
@@ -139,7 +180,7 @@ X-School-ID: SCH-3F2A
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `studentId` | string | Yes | 3–20 alphanumeric, hyphens, underscores |
+| `studentId` | string | Yes | 3–20 alphanumeric, hyphens, underscores. **Max 28 characters** — Stellar's text memo field is limited to 28 bytes; IDs longer than 28 characters are rejected with `400 VALIDATION_ERROR`. |
 | `name` | string | Yes | |
 | `class` | string | Yes | Must match an active fee structure |
 | `feeAmount` | number | No | Auto-assigned from fee structure if omitted |
@@ -183,8 +224,11 @@ X-School-ID: SCH-3F2A
 |---|---|---|---|
 | `page` | number | `1` | Page number |
 | `limit` | number | `50` | Results per page (max 200) |
-| `feePaid` | boolean | — | Filter by payment status |
-| `class` | string | — | Filter by class name |
+| `class` | string | — | Filter by exact class name (e.g. `Grade 5A`) |
+| `status` | string | — | Filter by payment status: `paid`, `unpaid`, or `partial` |
+| `search` | string | — | Case-insensitive match on `name` or `studentId` |
+
+Filters can be combined (e.g. `?class=Grade+5A&status=unpaid&search=ali`).
 
 **Response `200`**
 ```json
@@ -294,6 +338,36 @@ Sets `isActive: false`. Record is retained for audit.
 ```json
 { "message": "Fee structure for class Grade 5A deactivated" }
 ```
+
+### Update a fee structure — admin only
+```
+PUT /api/fees/:className
+Authorization: Bearer <token>
+X-School-ID: SCH-3F2A
+```
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `feeAmount` | number | Yes | New fee amount (positive) |
+| `description` | string | No | |
+| `academicYear` | string | No | e.g. `"2026"` |
+| `paymentDeadline` | string | No | ISO date string |
+| `cascadeToStudents` | boolean | No | If `true`, updates `feeAmount` on all students in this class |
+
+**Response `200`**
+```json
+{
+  "fee": { "className": "Grade 5A", "feeAmount": 300, "description": "Updated fee", "academicYear": "2026", "isActive": true },
+  "studentsUpdated": 42
+}
+```
+`studentsUpdated` is `0` when `cascadeToStudents` is omitted or `false`.
+
+**Errors**
+- `400 VALIDATION_ERROR` — `feeAmount` missing
+- `404 NOT_FOUND` — no active fee structure for this class
 
 ---
 
@@ -631,6 +705,43 @@ Optimistic locking for concurrent update protection.
 
 ---
 
+## Receipts
+
+All receipt routes require school context (`X-School-ID` header).
+
+Receipts are automatically generated when a payment reaches `SUCCESS` status via
+`POST /api/payments/verify`. They can also be retrieved at any time by transaction hash.
+
+### Get a receipt
+
+```
+GET /api/receipts/:txHash
+X-School-ID: SCH-3F2A
+```
+
+**Response `200`**
+```json
+{
+  "txHash": "abc123def456...",
+  "studentId": "STU001",
+  "studentName": "Alice Johnson",
+  "schoolId": "SCH-3F2A",
+  "schoolName": "Lincoln High",
+  "amount": 250,
+  "assetCode": "XLM",
+  "feeAmount": 250,
+  "feeValidationStatus": "valid",
+  "memo": "STU001",
+  "confirmedAt": "2026-03-24T10:00:00.000Z",
+  "issuedAt": "2026-03-24T10:00:01.000Z"
+}
+```
+
+**Errors**
+- `404 NOT_FOUND` — no receipt exists for this transaction hash in this school
+
+---
+
 ## Reports
 
 All report routes require school context.
@@ -654,7 +765,8 @@ X-School-ID: SCH-3F2A
   "generatedAt": "2026-03-24T10:00:00.000Z",
   "period": { "startDate": "2026-01-01", "endDate": "2026-03-31" },
   "summary": { "totalAmount": 1250, "paymentCount": 5, "validCount": 4, "overpaidCount": 1, "underpaidCount": 0, "fullyPaidStudentCount": 4 },
-  "byDate": [{ "date": "2026-03-24", "totalAmount": 500, "paymentCount": 2, "uniqueStudentCount": 2 }]
+  "byDate": [{ "date": "2026-03-24", "totalAmount": 500, "paymentCount": 2, "uniqueStudentCount": 2 }],
+  "byClass": [{ "className": "Grade 5A", "totalCollected": 750, "paymentCount": 3, "paidCount": 3, "unpaidCount": 1 }]
 }
 ```
 
@@ -669,12 +781,28 @@ X-School-ID: SCH-3F2A
 ```
 **Response `200`** — aggregated stats for the school dashboard (total students, total collected, unpaid count, recent payments).
 
+Fetches recent transactions from Stellar Horizon, matches memos to registered students, validates amounts, and records any new payments. Safe to call repeatedly — duplicate transactions are skipped.
+
+**Example request**
 ---
 
 ## Disputes
 
 All dispute routes require school context.
 
+```json
+{
+  "message": "Sync complete",
+  "summary": {
+    "found": 12,
+    "new": 3,
+    "matched": 2,
+    "unmatched": 1,
+    "failed": 0,
+    "alreadyProcessed": 9,
+    "failedDetails": []
+  }
+}
 ### Flag a dispute
 ```
 POST /api/disputes
@@ -682,6 +810,19 @@ X-School-ID: SCH-3F2A
 ```
 **Request body**
 
+`summary` fields:
+
+| Field | Description |
+|---|---|
+| `found` | Total transactions fetched from Horizon |
+| `new` | Transactions not previously seen |
+| `matched` | Transactions matched to a student via PaymentIntent |
+| `unmatched` | Transactions with no matching intent or student |
+| `failed` | Transactions that failed validation (underpaid, wrong destination, limit exceeded) |
+| `alreadyProcessed` | Transactions already recorded — sync stopped here |
+| `failedDetails` | Array of `{ txHash, reason }` for each failed transaction |
+
+**Stellar network unavailable `502`**
 | Field | Type | Required |
 |---|---|---|
 | `txHash` | string | Yes |
@@ -869,8 +1010,50 @@ Simple liveness probe. No auth or school context required.
 
 **Response `200`**
 ```json
-{ "status": "ok" }
+{
+  "status": "healthy",
+  "timestamp": "2026-04-23T15:00:00.000Z",
+  "logLevel": "info",
+  "checks": {
+    "database": { "status": "healthy", "latency_ms": 2 },
+    "stellar": { "status": "healthy", "latency_ms": 120, "network": "testnet", "horizonUrl": "https://horizon-testnet.stellar.org" },
+    "paymentProcessor": { "queueDepth": 0, "maxQueueDepth": 1000 }
+  }
+}
 ```
+
+`checks.paymentProcessor.queueDepth` is the number of payments currently being processed. When it reaches `maxQueueDepth` (controlled by `MAX_QUEUE_DEPTH` env var), new payments return `QUEUE_FULL` and are retried automatically.
+
+`logLevel` reflects the current runtime log level (see [Admin — Set Log Level](#admin--set-log-level)).
+
+---
+
+## Admin
+
+### Set log level — admin only
+
+Change the server log level at runtime without restarting.
+
+```
+POST /api/admin/log-level
+Authorization: Bearer <token>
+```
+
+**Request body**
+
+| Field | Type | Required | Values |
+|---|---|---|---|
+| `level` | string | Yes | `debug`, `info`, `warn`, `error` |
+
+**Response `200`**
+```json
+{ "previous": "info", "current": "debug" }
+```
+
+**Errors**
+- `400 INVALID_LOG_LEVEL` — level is missing or not one of the accepted values
+- `401 MISSING_AUTH_TOKEN` — no Bearer token provided
+- `403 INSUFFICIENT_ROLE` — token does not have admin role
 
 ---
 
@@ -893,6 +1076,7 @@ Validation middleware failures return an `errors` array:
 | Code | HTTP | Description |
 |---|---|---|
 | `VALIDATION_ERROR` | 400 | Request body or query parameter failed validation |
+| `INVALID_DATE_FORMAT` | 400 | `startDate` or `endDate` is not a valid ISO 8601 date, or `startDate` is after `endDate` |
 | `MISSING_IDEMPOTENCY_KEY` | 400 | `Idempotency-Key` header missing on required routes |
 | `MISSING_SCHOOL_CONTEXT` | 400 | `X-School-ID` or `X-School-Slug` header missing |
 | `TX_FAILED` | 400 | Stellar transaction failed on-chain |
@@ -909,4 +1093,326 @@ Validation middleware failures return an `errors` array:
 | `DUPLICATE_STUDENT` | 409 | Student ID already exists for this school |
 | `STELLAR_NETWORK_ERROR` | 502 | Stellar Horizon API unreachable |
 | `REQUEST_TIMEOUT` | 503 | Request exceeded server timeout |
+| `QUEUE_FULL` | 503 | Payment processor queue is at capacity; caller should retry after a delay |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
+
+---
+
+## Transaction Queue Durability
+
+The transaction processing queue (`transactionQueue.js`) provides **durable job delivery** via a two-layer approach:
+
+### How it works
+
+1. **MongoDB persistence first** — before a job is handed to Redis/BullMQ, a `PendingVerification` document is upserted with `status: pending`. This write is the source of truth.
+
+2. **Redis/BullMQ best-effort** — the job is then added to BullMQ. If Redis is unavailable the job is still safe in MongoDB and will be recovered on the next startup.
+
+3. **Startup recovery** — on every server start, `recoverPendingJobs()` queries MongoDB for all documents with `status: pending | processing` and re-enqueues them into BullMQ. Documents with `status: processing` are reset to `pending` first (they were in-flight when the server crashed).
+
+4. **Outcome tracking** — when a job completes successfully the document is updated to `status: resolved`. When a job permanently fails (e.g. `TX_FAILED`, `UNSUPPORTED_ASSET`) the document is updated to `status: dead_letter` with the error message stored in `lastError`.
+
+### Idempotency
+
+`txHash` is the unique key for `PendingVerification` (MongoDB unique index). Calling `enqueueTransaction()` twice for the same hash is safe — the upsert uses `$setOnInsert` so the existing document is not overwritten, and BullMQ deduplicates by `jobId: txHash`.
+
+### PendingVerification document statuses
+
+| Status | Meaning |
+|---|---|
+| `pending` | Job persisted to MongoDB, not yet processed |
+| `processing` | Worker picked up the job; in-flight |
+| `resolved` | Job completed successfully |
+| `dead_letter` | Permanent failure; will not be retried |
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TX_QUEUE_CONCURRENCY` | `5` | Number of concurrent transaction processing workers |
+| `REDIS_HOST` | `localhost` | Redis host for BullMQ |
+| `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_PASSWORD` | _(none)_ | Redis password (optional) |
+
+
+---
+
+## Source Validation Rules
+
+Source validation rules allow administrators to control which Stellar payment source addresses are accepted or flagged. Rules are global (not per-school) and are evaluated during payment processing.
+
+### Rule Types
+
+| Type | Description |
+|------|-------------|
+| `blacklist` | Reject payments from a specific source address |
+| `whitelist` | Only accept payments from a specific source address |
+| `pattern` | Match source addresses against a regular expression |
+| `new_sender_limit` | Cap the number of transactions per day from first-time senders |
+
+### Endpoints
+
+All source-rule endpoints require admin authentication (`Authorization: Bearer <token>`).
+
+---
+
+#### POST /api/source-rules
+
+Create a new source validation rule.
+
+**Request body:**
+
+```json
+{
+  "name": "block-suspicious-sender",
+  "type": "blacklist",
+  "value": "GBADACTOR...",
+  "description": "Known fraudulent address",
+  "isActive": true,
+  "priority": 10
+}
+```
+
+For `new_sender_limit` rules, include `maxTransactionsPerDay` instead of `value`:
+
+```json
+{
+  "name": "new-sender-cap",
+  "type": "new_sender_limit",
+  "maxTransactionsPerDay": 3,
+  "description": "Limit new senders to 3 transactions per day"
+}
+```
+
+**Required fields:** `name`, `type`  
+**Required for blacklist/whitelist/pattern:** `value`
+
+**Response `201`:**
+
+```json
+{
+  "_id": "...",
+  "name": "block-suspicious-sender",
+  "type": "blacklist",
+  "value": "GBADACTOR...",
+  "description": "Known fraudulent address",
+  "isActive": true,
+  "priority": 10,
+  "maxTransactionsPerDay": null,
+  "createdAt": "2026-04-23T00:00:00.000Z",
+  "updatedAt": "2026-04-23T00:00:00.000Z"
+}
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 400 | `VALIDATION_ERROR` | Missing required fields, invalid type, or invalid regex pattern |
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 409 | `DUPLICATE_RULE` | A rule with this name already exists |
+
+---
+
+#### GET /api/source-rules
+
+List all source validation rules. Supports optional query filters.
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `type` | string | Filter by rule type (`blacklist`, `whitelist`, `pattern`, `new_sender_limit`) |
+| `isActive` | boolean | Filter by active status (`true` or `false`) |
+
+**Response `200`:**
+
+```json
+[
+  {
+    "_id": "...",
+    "name": "block-suspicious-sender",
+    "type": "blacklist",
+    "value": "GBADACTOR...",
+    "isActive": true,
+    "priority": 10,
+    "createdAt": "2026-04-23T00:00:00.000Z"
+  }
+]
+```
+
+---
+
+#### DELETE /api/source-rules/:id
+
+Permanently delete a source validation rule by its MongoDB `_id`.
+
+**Response `200`:**
+
+```json
+{
+  "message": "Rule \"block-suspicious-sender\" deleted."
+}
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 404 | `NOT_FOUND` | No rule found with the given id |
+
+
+## Fee Adjustment Rules
+
+Manage dynamic fee adjustment rules (discounts, penalties, waivers) scoped to a school.  
+All write endpoints require admin authentication and a school context header.
+
+### Rule Types
+
+| Type | Effect |
+|------|--------|
+| `discount_percentage` | Reduce fee by `value`% |
+| `discount_fixed` | Reduce fee by a fixed `value` amount |
+| `penalty_percentage` | Increase fee by `value`% |
+| `penalty_fixed` | Increase fee by a fixed `value` amount |
+| `waiver` | Waive the full fee (set to 0) |
+
+---
+
+#### POST /api/fee-adjustments
+
+Create a new fee adjustment rule for the school.
+
+**Headers:** `Authorization: Bearer <admin-token>`, `X-School-ID` or `X-School-Slug`
+
+**Request body:**
+
+```json
+{
+  "name": "Early Bird Discount",
+  "type": "discount_percentage",
+  "value": 10,
+  "conditions": {
+    "studentClass": ["JSS1", "JSS2"],
+    "paymentBefore": "2026-09-01T00:00:00.000Z"
+  },
+  "priority": 5,
+  "description": "10% discount for early payment"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | ✅ | Unique rule name within the school |
+| `type` | ✅ | One of the rule types above |
+| `value` | ✅ | Non-negative number (percentage or fixed amount) |
+| `conditions` | No | Object with optional `studentClass[]`, `academicYear`, `paymentBefore`, `paymentAfter`, `minAmount`, `maxAmount` |
+| `priority` | No | Lower number = applied first (default: 10) |
+| `description` | No | Human-readable description |
+
+**Response `201`:**
+
+```json
+{
+  "_id": "507f1f77bcf86cd799439011",
+  "schoolId": "SCH001",
+  "name": "Early Bird Discount",
+  "type": "discount_percentage",
+  "value": 10,
+  "conditions": { "studentClass": ["JSS1", "JSS2"], "paymentBefore": "2026-09-01T00:00:00.000Z" },
+  "priority": 5,
+  "isActive": true,
+  "description": "10% discount for early payment",
+  "createdAt": "2026-04-23T15:00:00.000Z",
+  "updatedAt": "2026-04-23T15:00:00.000Z"
+}
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 400 | `VALIDATION_ERROR` | Missing or invalid fields |
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 409 | `DUPLICATE_RULE` | A rule with this name already exists for the school |
+
+---
+
+#### GET /api/fee-adjustments
+
+List all fee adjustment rules for the school (active and inactive).
+
+**Headers:** `X-School-ID` or `X-School-Slug`
+
+**Response `200`:**
+
+```json
+[
+  {
+    "_id": "507f1f77bcf86cd799439011",
+    "schoolId": "SCH001",
+    "name": "Early Bird Discount",
+    "type": "discount_percentage",
+    "value": 10,
+    "conditions": {},
+    "priority": 5,
+    "isActive": true,
+    "description": "10% discount for early payment"
+  }
+]
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 400 | `MISSING_SCHOOL_CONTEXT` | No school header provided |
+| 404 | `SCHOOL_NOT_FOUND` | School not found or inactive |
+
+---
+
+#### PUT /api/fee-adjustments/:id
+
+Update an existing fee adjustment rule.
+
+**Headers:** `Authorization: Bearer <admin-token>`, `X-School-ID` or `X-School-Slug`
+
+**Request body:** Same fields as POST.
+
+**Response `200`:** Updated rule object.
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 400 | `VALIDATION_ERROR` | Missing or invalid fields |
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 404 | `NOT_FOUND` | No rule found with the given id for this school |
+| 409 | `DUPLICATE_RULE` | Another rule with this name already exists |
+
+---
+
+#### DELETE /api/fee-adjustments/:id
+
+Deactivate a fee adjustment rule (soft delete — sets `isActive: false`).
+
+**Headers:** `Authorization: Bearer <admin-token>`, `X-School-ID` or `X-School-Slug`
+
+**Response `200`:**
+
+```json
+{ "message": "Rule \"Early Bird Discount\" deactivated" }
+```
+
+**Error responses:**
+
+| Status | Code | Reason |
+|--------|------|--------|
+| 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
+| 404 | `NOT_FOUND` | No rule found with the given id for this school |

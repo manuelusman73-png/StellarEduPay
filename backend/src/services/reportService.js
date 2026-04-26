@@ -84,12 +84,47 @@ async function generateReport({ schoolId, startDate, endDate } = {}) {
     feePaid: true,
   });
 
+  // Per-class breakdown: total collected, paid/unpaid student counts, payment count
+  const byClass = await Payment.aggregate([
+    { $match: { ...match, studentId: { $exists: true } } },
+    {
+      $lookup: {
+        from: 'students',
+        localField: 'studentId',
+        foreignField: 'studentId',
+        as: 'student',
+      },
+    },
+    { $unwind: { path: '$student', preserveNullAndEmpty: false } },
+    {
+      $group: {
+        _id: '$student.class',
+        totalCollected: { $sum: '$amount' },
+        paymentCount: { $sum: 1 },
+        paidStudentIds: { $addToSet: { $cond: ['$student.feePaid', '$studentId', '$$REMOVE'] } },
+        unpaidStudentIds: { $addToSet: { $cond: ['$student.feePaid', '$$REMOVE', '$studentId'] } },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        className: '$_id',
+        totalCollected: { $round: ['$totalCollected', 7] },
+        paymentCount: 1,
+        paidCount: { $size: '$paidStudentIds' },
+        unpaidCount: { $size: '$unpaidStudentIds' },
+      },
+    },
+    { $sort: { className: 1 } },
+  ]);
+
   return {
     generatedAt: new Date().toISOString(),
     schoolId,
     period: { startDate: startDate || null, endDate: endDate || null },
     summary: { ...totals, fullyPaidStudentCount: fullyPaidCount },
     byDate,
+    byClass,
   };
 }
 
@@ -115,6 +150,14 @@ function reportToCsv(report) {
   lines.push('Date,Total Amount,Payment Count,Valid,Overpaid,Underpaid,Unique Students');
   for (const row of report.byDate) {
     lines.push([row.date, row.totalAmount, row.paymentCount, row.validCount, row.overpaidCount, row.underpaidCount, row.uniqueStudentCount].join(','));
+  }
+  if (report.byClass && report.byClass.length > 0) {
+    lines.push('');
+    lines.push('--- Class Breakdown ---');
+    lines.push('Class,Total Collected,Payment Count,Paid Students,Unpaid Students');
+    for (const row of report.byClass) {
+      lines.push([row.className, row.totalCollected, row.paymentCount, row.paidCount, row.unpaidCount].join(','));
+    }
   }
   return lines.join('\n');
 }

@@ -1,0 +1,30 @@
+{
+  "root": true,
+  "extends": [
+    "eslint:recommended",
+    "node"
+  ],
+  "env": {
+    "node": true,
+    "es2020": true,
+    "jest": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2020,
+    "sourceType": "module"
+  },
+  "rules": {
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "require-await": "error",
+    "node/exports-style": "off",
+    "node/no-extraneous-require": "off",
+    "import/no-commonjs": "off",
+    "class-methods-use-this": "off",
+    "no-loop-func": "off",
+    "eqeqeq": "off",
+    "no-invalid-this": "off",
+    "no-process-exit": "off",
+    "no-empty-function": "off",
+    "no-useless-escape": "off"
+  }
+}

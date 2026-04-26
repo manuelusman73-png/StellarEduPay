@@ -12,6 +12,7 @@ const TTL = {
   FEES: 300,             // fee structures change rarely — 5 min
   STUDENTS: 60,          // student list — 1 min
   STUDENT: 60,           // single student — 1 min
+  SCHOOL: 300,           // school lookup — 5 min
   BALANCE: 30,           // balance aggregation — 30 sec
   PAYMENTS: 30,          // payment list — 30 sec
   OVERPAYMENTS: 30,
@@ -27,6 +28,7 @@ const KEYS = {
   feeByClass: (className) => `fees:${className}`,
   studentsAll: () => 'students:all',
   student: (studentId) => `student:${studentId}`,
+  school: (schoolIdOrSlug) => `school:${schoolIdOrSlug}`,
   balance: (studentId) => `balance:${studentId}`,
   payments: (studentId) => `payments:${studentId}`,
   overpayments: () => 'overpayments',

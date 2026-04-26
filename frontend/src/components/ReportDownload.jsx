@@ -1,123 +1,138 @@
-import { useState } from 'react';
-import { getReport, getReportCsvUrl } from '../services/api';
+import { useState } from "react";
+import { getReport, getReportCsvUrl } from "../services/api";
 
 export default function ReportDownload() {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [report, setReport] = useState(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate]     = useState("");
+  const [report, setReport]       = useState(null);
+  const [error, setError]         = useState("");
+  const [loading, setLoading]     = useState(false);
 
   async function handleGenerate(e) {
     e.preventDefault();
-    setError('');
-    setReport(null);
-    setLoading(true);
+    setError(""); setReport(null); setLoading(true);
     try {
       const params = {};
       if (startDate) params.startDate = startDate;
-      if (endDate) params.endDate = endDate;
+      if (endDate)   params.endDate   = endDate;
       const { data } = await getReport(params);
       setReport(data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to generate report.');
+      setError(err.response?.data?.error || "Failed to generate report.");
     } finally {
       setLoading(false);
     }
   }
 
-  function handleDownloadCsv() {
+  function handleCsv() {
     const params = {};
     if (startDate) params.startDate = startDate;
-    if (endDate) params.endDate = endDate;
-    window.open(getReportCsvUrl(params), '_blank');
+    if (endDate)   params.endDate   = endDate;
+    window.open(getReportCsvUrl(params), "_blank");
   }
 
+  const COLS = ["Date", "Amount", "Payments", "Valid", "Overpaid", "Underpaid", "Students"];
+
   return (
-    <div style={{ maxWidth: 700, margin: '2rem auto', fontFamily: 'sans-serif' }}>
-      <h2>Payment Reports</h2>
+    <>
+      <style>{`
+        .rpt-wrap { max-width: 800px; margin: 2.5rem auto; padding: 0 1rem; }
+        .rpt-input { padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; background: var(--bg); color: var(--text); outline: none; }
+        .rpt-input:focus { border-color: var(--accent); }
+        .rpt-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .rpt-stat { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; }
+        .rpt-stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.35rem; }
+        .rpt-stat-value { font-size: 1.4rem; font-weight: 700; }
+        .rpt-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        .rpt-table th { text-align: left; padding: 0.6rem 0.75rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--border); }
+        .rpt-table td { padding: 0.75rem; border-bottom: 1px solid var(--border); }
+        .rpt-table tbody tr:last-child td { border-bottom: none; }
+        .rpt-table tbody tr:hover { background: rgba(126,200,227,0.05); }
+        .rpt-table-wrap { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+      `}</style>
 
-      <form onSubmit={handleGenerate} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
-          Start Date
-          <input
-            type="date"
-            value={startDate}
-            onChange={e => setStartDate(e.target.value)}
-            style={{ padding: '0.4rem', marginTop: '0.25rem' }}
-          />
-        </label>
-        <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
-          End Date
-          <input
-            type="date"
-            value={endDate}
-            onChange={e => setEndDate(e.target.value)}
-            style={{ padding: '0.4rem', marginTop: '0.25rem' }}
-          />
-        </label>
-        <button type="submit" disabled={loading} style={{ padding: '0.5rem 1.25rem' }}>
-          {loading ? 'Loading...' : 'Generate Report'}
-        </button>
-      </form>
+      <div className="rpt-wrap">
+        <h2 style={{ marginBottom: "0.25rem" }}>Reports</h2>
+        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginBottom: "1.75rem" }}>
+          Generate a payment summary for any date range.
+        </p>
 
-      {error && <p style={{ color: 'red', marginTop: '0.75rem' }}>{error}</p>}
-
-      {report && (
-        <div style={{ marginTop: '1.5rem' }}>
-          {/* Summary */}
-          <div style={{ background: '#f5f5f5', padding: '1rem', borderRadius: 8, marginBottom: '1rem' }}>
-            <p style={{ margin: '0 0 0.5rem', fontWeight: 'bold' }}>Summary</p>
-            <p style={{ margin: '0.2rem 0' }}>Generated: {new Date(report.generatedAt).toLocaleString()}</p>
-            <p style={{ margin: '0.2rem 0' }}>
-              Period: {report.period.startDate || 'all time'} → {report.period.endDate || 'all time'}
-            </p>
-            <hr style={{ margin: '0.75rem 0' }} />
-            <p style={{ margin: '0.2rem 0' }}>Total Collected: <strong>{report.summary.totalAmount} XLM/USDC</strong></p>
-            <p style={{ margin: '0.2rem 0' }}>Total Payments: {report.summary.paymentCount}</p>
-            <p style={{ margin: '0.2rem 0' }}>Valid: {report.summary.validCount} | Overpaid: {report.summary.overpaidCount} | Underpaid: {report.summary.underpaidCount}</p>
-            <p style={{ margin: '0.2rem 0' }}>Fully Paid Students: {report.summary.fullyPaidStudentCount}</p>
+        <form onSubmit={handleGenerate} style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", marginBottom: "0.35rem" }}>Start Date</label>
+            <input type="date" className="rpt-input" value={startDate} onChange={e => setStartDate(e.target.value)} />
           </div>
-
-          {/* Daily breakdown table */}
-          {report.byDate.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-              <thead>
-                <tr style={{ background: '#e0e0e0' }}>
-                  {['Date', 'Total Amount', 'Payments', 'Valid', 'Overpaid', 'Underpaid', 'Students'].map(h => (
-                    <th key={h} style={{ padding: '0.5rem', textAlign: 'left', border: '1px solid #ccc' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {report.byDate.map(row => (
-                  <tr key={row.date}>
-                    <td style={cell}>{row.date}</td>
-                    <td style={cell}>{row.totalAmount}</td>
-                    <td style={cell}>{row.paymentCount}</td>
-                    <td style={cell}>{row.validCount}</td>
-                    <td style={cell}>{row.overpaidCount}</td>
-                    <td style={cell}>{row.underpaidCount}</td>
-                    <td style={cell}>{row.uniqueStudentCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{ color: '#888' }}>No payments found for this period.</p>
-          )}
-
-          {/* Download button */}
-          <button
-            onClick={handleDownloadCsv}
-            style={{ marginTop: '1rem', padding: '0.5rem 1.25rem', cursor: 'pointer' }}
-          >
-            Download CSV
+          <div>
+            <label style={{ display: "block", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", marginBottom: "0.35rem" }}>End Date</label>
+            <input type="date" className="rpt-input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          </div>
+          <button type="submit" disabled={loading} className="btn-primary">
+            {loading ? "Generating…" : "Generate"}
           </button>
-        </div>
-      )}
-    </div>
+        </form>
+
+        {error && (
+          <div style={{ marginTop: "1rem", padding: "0.75rem 1rem", background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 8, color: "#991b1b", fontSize: "0.875rem" }}>
+            {error}
+          </div>
+        )}
+
+        {report && (
+          <>
+            {/* Summary stats */}
+            <div className="rpt-stat-grid">
+              {[
+                { label: "Total Collected", value: `${report.summary.totalAmount} XLM` },
+                { label: "Payments",        value: report.summary.paymentCount },
+                { label: "Valid",           value: report.summary.validCount,     color: "#166534" },
+                { label: "Overpaid",        value: report.summary.overpaidCount,  color: "#854d0e" },
+                { label: "Underpaid",       value: report.summary.underpaidCount, color: "#991b1b" },
+                { label: "Paid Students",   value: report.summary.fullyPaidStudentCount },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="rpt-stat">
+                  <div className="rpt-stat-label">{label}</div>
+                  <div className="rpt-stat-value" style={color ? { color } : {}}>{value}</div>
+                </div>
+              ))}
+            </div>
+
+            <p style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "1rem" }}>
+              Period: {report.period.startDate || "all time"} → {report.period.endDate || "all time"} &nbsp;·&nbsp;
+              Generated {new Date(report.generatedAt).toLocaleString()}
+            </p>
+
+            {/* Daily table */}
+            {report.byDate.length > 0 ? (
+              <div className="rpt-table-wrap">
+                <table className="rpt-table">
+                  <thead>
+                    <tr>{COLS.map(h => <th key={h}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {report.byDate.map(row => (
+                      <tr key={row.date}>
+                        <td>{row.date}</td>
+                        <td>{row.totalAmount}</td>
+                        <td>{row.paymentCount}</td>
+                        <td style={{ color: "#166534" }}>{row.validCount}</td>
+                        <td style={{ color: "#854d0e" }}>{row.overpaidCount}</td>
+                        <td style={{ color: "#991b1b" }}>{row.underpaidCount}</td>
+                        <td>{row.uniqueStudentCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p style={{ color: "var(--muted)" }}>No payments found for this period.</p>
+            )}
+
+            <button onClick={handleCsv} className="btn-primary" style={{ marginTop: "1.25rem" }}>
+              Download CSV
+            </button>
+          </>
+        )}
+      </div>
+    </>
   );
 }
-
-const cell = { padding: '0.4rem 0.5rem', border: '1px solid #ccc' };

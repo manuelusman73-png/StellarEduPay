@@ -4,14 +4,22 @@
  * Transaction Queue Service
  *
  * Bridges the BullMQ transaction processing queue with the Stellar verification
- * logic. Starts the worker on app boot and exposes helpers used by the controller.
+ * logic. Starts the worker on app boot, calls recoverPendingJobs() to re-enqueue
+ * any jobs that survived a restart in MongoDB, and marks PendingVerification
+ * documents resolved/dead after each job completes.
  */
 
-const { startTransactionWorker } = require('../queue/transactionQueue');
+const {
+  startTransactionWorker,
+  recoverPendingJobs,
+  markResolved,
+  markDead,
+} = require('../queue/transactionQueue');
 const { verifyTransaction, recordPayment } = require('./stellarService');
 const Payment = require('../models/paymentModel');
 const Student = require('../models/studentModel');
 const PaymentIntent = require('../models/paymentIntentModel');
+const PendingVerification = require('../models/pendingVerificationModel');
 const logger = require('../utils/logger');
 
 const PERMANENT_FAIL_CODES = [
@@ -25,10 +33,17 @@ const PERMANENT_FAIL_CODES = [
 async function processTransactionJob(job) {
   const { txHash, schoolId, school } = job.data;
 
+  // Mark as processing in MongoDB so restart recovery knows it was in-flight
+  await PendingVerification.findOneAndUpdate(
+    { txHash, status: { $in: ['pending', 'processing'] } },
+    { status: 'processing', lastAttemptAt: new Date(), $inc: { attempts: 1 } }
+  );
+
   // Skip if already recorded
   const existing = await Payment.findOne({ txHash, schoolId });
   if (existing) {
     logger.info('[TxQueueService] Transaction already processed, skipping', { txHash });
+    await markResolved(txHash);
     return { skipped: true, txHash };
   }
 
@@ -71,19 +86,22 @@ async function processTransactionJob(job) {
     verifiedAt:          now,
   });
 
+  // Mark durable record resolved
+  await markResolved(txHash);
+
   logger.info('[TxQueueService] Transaction processed successfully', { txHash });
   return { success: true, txHash, studentId: result.studentId || result.memo };
 }
 
 /**
- * Processor wrapper: permanent errors are not retried.
+ * Processor wrapper: permanent errors are not retried; mark dead in MongoDB.
  */
 async function jobProcessor(job) {
   try {
     return await processTransactionJob(job);
   } catch (err) {
     if (PERMANENT_FAIL_CODES.includes(err.code)) {
-      // Mark as permanently failed in Payment collection for audit trail
+      // Audit trail
       await Payment.create({
         schoolId:  job.data.schoolId,
         studentId: 'unknown',
@@ -92,8 +110,18 @@ async function jobProcessor(job) {
         status:    'FAILED',
         feeValidationStatus: 'unknown',
       }).catch(() => {});
-      // Throw a non-retryable error by exhausting attempts
+
+      // Mark durable record as dead_letter
+      await markDead(job.data.txHash, err);
+
       err.message = `[permanent] ${err.message}`;
+    } else {
+      // Transient failure — update lastError but keep status=processing so
+      // BullMQ retries; if all retries exhaust, markDead will be called below.
+      await PendingVerification.findOneAndUpdate(
+        { txHash: job.data.txHash },
+        { lastError: err.message }
+      );
     }
     throw err;
   }
@@ -101,9 +129,17 @@ async function jobProcessor(job) {
 
 let worker = null;
 
-function startWorker() {
+async function startWorker() {
   if (worker) return worker;
   worker = startTransactionWorker(jobProcessor);
+
+  // Re-enqueue any jobs that survived a restart in MongoDB
+  try {
+    await recoverPendingJobs();
+  } catch (err) {
+    logger.error('[TxQueueService] Startup recovery failed', { error: err.message });
+  }
+
   return worker;
 }
 

@@ -9,8 +9,8 @@ const Payment = require("../models/paymentModel");
 const Student = require("../models/studentModel");
 const PaymentIntent = require("../models/paymentIntentModel");
 const { validatePaymentAmount } = require("../utils/paymentLimits");
-const { generateReferenceCode } = require("../utils/generateReferenceCode");
 const { withStellarRetry } = require("../utils/withStellarRetry");
+const { savePayment } = require("./transactionService");
 const logger = require("../utils/logger").child("StellarService");
 
 function detectAsset(payOp) {
@@ -33,6 +33,10 @@ function normalizeAmount(rawAmount) {
  */
 async function extractValidPayment(tx, walletAddress) {
   if (!tx.successful) return null;
+
+  // Only process MEMO_TEXT — MEMO_ID, MEMO_HASH, MEMO_RETURN produce
+  // non-string values that cannot be matched to a student ID.
+  if (tx.memo_type !== 'text') return null;
 
   const memo = tx.memo ? tx.memo.trim() : null;
   if (!memo) return null;
@@ -117,6 +121,8 @@ async function detectMemoCollision(
         ") within the last 24 hours",
     };
   }
+
+  return { suspicious: false, reason: null };
 }
 
 /**
@@ -173,48 +179,6 @@ async function detectAbnormalPatterns(
     return { suspicious: true, reason: reasons.join("; ") };
   }
   return { suspicious: false, reason: null };
-}
-
-/**
- * Persist a payment record, enforcing uniqueness on txHash.
- * Throws DUPLICATE_TX if already recorded.
- * data must include schoolId.
- */
-async function recordPayment(data) {
-  const exists = await Payment.findOne({
-    transactionHash: data.transactionHash,
-  });
-  if (exists) {
-    const err = new Error(
-      `Transaction ${data.transactionHash} has already been processed`,
-    );
-    err.code = "DUPLICATE_TX";
-    throw err;
-  }
-  if (!data.referenceCode) {
-    data = { ...data, referenceCode: await generateReferenceCode() };
-  }
-  try {
-    return await Payment.create(data);
-  } catch (e) {
-    if (e.code === 11000) {
-      const err = new Error(
-        `Transaction ${data.transactionHash} has already been processed`,
-      );
-      err.code = "DUPLICATE_TX";
-      logger.warn("Duplicate transaction rejected", {
-        txHash: data.transactionHash,
-        schoolId: data.schoolId,
-      });
-      throw err;
-    }
-    logger.error("Failed to record payment", {
-      error: e.message,
-      txHash: data.transactionHash,
-      schoolId: data.schoolId,
-    });
-    throw e;
-  }
 }
 
 /**
@@ -299,10 +263,10 @@ async function verifyTransaction(txHash, walletAddress) {
     feeAmount != null
       ? validatePaymentAgainstFee(amount, feeAmount)
       : {
-          status: "unknown",
-          excessAmount: 0,
-          message: "Student not found, cannot validate fee",
-        };
+        status: "unknown",
+        excessAmount: 0,
+        message: "Student not found, cannot validate fee",
+      };
 
   // Extract network fee from transaction
   const networkFee = parseFloat(tx.fee_paid || "0") / 10000000; // Convert stroops to XLM
@@ -325,12 +289,30 @@ async function verifyTransaction(txHash, walletAddress) {
 
 /**
  * Fetch recent transactions for a specific school wallet and record new payments.
+ * Returns a summary object with counts for each outcome category.
+ * Paginates through ALL transactions (200 per page) until an already-processed
+ * transaction is encountered, ensuring no payments are missed after downtime.
  *
  * @param {object} school - School document with { schoolId, stellarAddress }
+ * @returns {object} summary - { found, new: newCount, matched, unmatched, failed, alreadyProcessed, failedDetails }
  */
 async function syncPaymentsForSchool(school) {
   const { schoolId, stellarAddress } = school;
 
+  // Summary counters
+  const summary = {
+    found: 0,
+    new: 0,
+    matched: 0,
+    unmatched: 0,
+    failed: 0,
+    alreadyProcessed: 0,
+    failedDetails: [],   // [{ txHash, reason }]
+  };
+
+  // Fetch up to 200 transactions per page (Horizon API maximum).
+  // Pagination continues until we hit an already-recorded transaction or
+  // exhaust all pages — fixing the previous limit(20) single-fetch bug.
   let page = await withStellarRetry(
     () =>
       server
@@ -346,34 +328,71 @@ async function syncPaymentsForSchool(school) {
   let newPayments = 0;
   while (!done) {
     for (const tx of page.records) {
+      summary.found++;
+
       const existing = await Payment.findOne({ txHash: tx.hash });
+      if (existing) { summary.alreadyProcessed++; done = true; break; }
+
+      summary.new++;
       if (existing) {
         done = true;
         break;
       }
 
       const valid = await extractValidPayment(tx, stellarAddress);
-      if (!valid) continue;
+      if (!valid) {
+        // Log if the tx was skipped due to wrong destination
+        if (tx.successful) {
+          const ops = await withStellarRetry(
+            () => tx.operations(),
+            { label: 'syncPaymentsForSchool.destinationCheck' }
+          ).catch(() => ({ records: [] }));
+          const wrongDest = ops.records.find(
+            op => op.type === 'payment' && op.to && op.to !== stellarAddress
+          );
+          if (wrongDest) {
+            logger.warn('Transaction skipped — destination does not match school wallet', {
+              txHash: tx.hash, schoolId,
+              destination: wrongDest.to,
+              expected: stellarAddress,
+            });
+            summary.failed++;
+            summary.failedDetails.push({ txHash: tx.hash, reason: `INVALID_DESTINATION: payment sent to ${wrongDest.to}, expected ${stellarAddress}` });
+            continue;
+          }
+        }
+        summary.unmatched++;
+        continue;
+      }
 
       const { payOp, memo } = valid;
 
-      const intent = await PaymentIntent.findOne({
-        schoolId,
-        memo,
-        status: "pending",
-      });
-      if (!intent) continue;
+      // Explicit destination check — defence-in-depth beyond extractValidPayment
+      if (payOp.to !== stellarAddress) {
+        logger.warn('Transaction skipped — destination mismatch after extraction', {
+          txHash: tx.hash, schoolId, destination: payOp.to, expected: stellarAddress,
+        });
+        summary.failed++;
+        summary.failedDetails.push({ txHash: tx.hash, reason: `INVALID_DESTINATION: payment sent to ${payOp.to}` });
+        continue;
+      }
 
-      const student = await Student.findOne({
-        schoolId,
-        studentId: intent.studentId,
-      });
-      if (!student) continue;
+      const intent = await PaymentIntent.findOne({ schoolId, memo, status: 'pending' });
+      if (!intent) { summary.unmatched++; continue; }
+
+      const student = await Student.findOne({ schoolId, studentId: intent.studentId });
+      if (!student) { summary.unmatched++; continue; }
+
+      summary.matched++;
 
       const paymentAmount = parseFloat(payOp.amount);
 
       const limitValidation = validatePaymentAmount(paymentAmount);
-      if (!limitValidation.valid) continue;
+      if (!limitValidation.valid) {
+        summary.failed++;
+        summary.failedDetails.push({ txHash: tx.hash, reason: limitValidation.code });
+        continue;
+      }
 
       const senderAddress = payOp.from || null;
       const txDate = new Date(tx.created_at);
@@ -406,7 +425,7 @@ async function syncPaymentsForSchool(school) {
       );
 
       let cumulativeStatus;
-      if (cumulativeTotal < student.feeAmount) cumulativeStatus = "underpaid";
+      if (cumulativeTotal < student.feeAmount) cumulativeStatus = "partial";
       else if (cumulativeTotal > student.feeAmount)
         cumulativeStatus = "overpaid";
       else cumulativeStatus = "valid";
@@ -416,46 +435,18 @@ async function syncPaymentsForSchool(school) {
           ? parseFloat((cumulativeTotal - student.feeAmount).toFixed(7))
           : 0;
 
-      const feeValidation = validatePaymentAgainstFee(
-        paymentAmount,
-        intent.amount,
-      );
+      // In the sync path, partial payments are accepted — the cumulative status
+      // (partial / valid / overpaid) is what gets recorded. Per-transaction
+      // underpaid rejection is intentionally skipped here; the verifyPayment
+      // endpoint still rejects underpaid single-payment verifications.
 
-      if (feeValidation.status === "underpaid") {
-        logger.warn("Underpaid transaction skipped", {
-          txHash: tx.hash,
-          schoolId,
-          studentId: intent.studentId,
-          paid: paymentAmount,
-          required: intent.amount,
-        });
-        await Payment.create({
-          schoolId,
-          studentId: intent.studentId,
-          txHash: tx.hash,
-          amount: paymentAmount,
-          feeAmount: intent.amount,
-          feeValidationStatus: "underpaid",
-          excessAmount: 0,
-          status: "FAILED",
-          memo,
-          senderAddress,
-          isSuspicious: true,
-          suspicionReason: feeValidation.message,
-          ledger: txLedger,
-          confirmationStatus: "failed",
-          confirmedAt: txDate,
-        });
-        newPayments++;
-        continue;
-      }
-
-      await Payment.create({
+      await savePayment({
         schoolId,
         studentId: intent.studentId,
         txHash: tx.hash,
         amount: paymentAmount,
         feeAmount: intent.amount,
+        feeCategory: intent.feeCategory || null,
         feeValidationStatus: cumulativeStatus,
         excessAmount,
         status: "confirmed",
@@ -480,12 +471,49 @@ async function syncPaymentsForSchool(school) {
       });
 
       if (isConfirmed && !collision.suspicious) {
+        // Update student record
+        const updateData = {
+          totalPaid: cumulativeTotal,
+          remainingBalance: parseFloat(Math.max(0, student.feeAmount - cumulativeTotal).toFixed(7)),
+          feePaid: cumulativeTotal >= student.feeAmount,
+        };
+
+        // If this payment is for a specific fee category, update that category's paid status
+        if (intent.feeCategory && student.fees && student.fees.length > 0) {
+          const feeIndex = student.fees.findIndex(f => f.category === intent.feeCategory);
+          if (feeIndex !== -1) {
+            // Calculate new total paid for this category
+            const categoryPayments = await Payment.aggregate([
+              {
+                $match: {
+                  schoolId,
+                  studentId: intent.studentId,
+                  feeCategory: intent.feeCategory,
+                  confirmationStatus: "confirmed",
+                  isSuspicious: false,
+                },
+              },
+              { $group: { _id: null, total: { $sum: "$amount" } } },
+            ]);
+            const categoryTotalPaid = categoryPayments.length
+              ? parseFloat(categoryPayments[0].total.toFixed(7))
+              : 0;
+
+            // Update the specific fee category
+            student.fees[feeIndex].totalPaid = categoryTotalPaid;
+            student.fees[feeIndex].remainingBalance = Math.max(
+              0,
+              student.fees[feeIndex].amount - categoryTotalPaid
+            );
+            student.fees[feeIndex].paid = categoryTotalPaid >= student.fees[feeIndex].amount;
+
+            updateData.fees = student.fees;
+          }
+        }
+
         await Student.findOneAndUpdate(
           { schoolId, studentId: intent.studentId },
-          {
-            totalPaid: cumulativeTotal,
-            feePaid: cumulativeTotal >= student.feeAmount,
-          },
+          updateData,
         );
       }
 
@@ -502,6 +530,8 @@ async function syncPaymentsForSchool(school) {
       if (!page || !page.records.length) break;
     }
   }
+
+  return summary;
   return { newPayments };
 }
 
@@ -551,9 +581,47 @@ async function finalizeConfirmedPayments(schoolId) {
       Math.max(0, student.feeAmount - totalPaid).toFixed(7),
     );
 
+    const updateData = { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount };
+
+    // Update fee categories if they exist
+    if (student.fees && student.fees.length > 0) {
+      const categoryPayments = await Payment.aggregate([
+        {
+          $match: {
+            schoolId,
+            studentId: payment.studentId,
+            feeCategory: { $ne: null },
+            confirmationStatus: "confirmed",
+            isSuspicious: false,
+          },
+        },
+        {
+          $group: {
+            _id: "$feeCategory",
+            totalPaid: { $sum: "$amount" },
+          },
+        },
+      ]);
+
+      const categoryPaymentMap = {};
+      categoryPayments.forEach(cp => {
+        categoryPaymentMap[cp._id] = parseFloat(cp.totalPaid.toFixed(7));
+      });
+
+      // Update each fee category
+      student.fees.forEach(fee => {
+        const paid = categoryPaymentMap[fee.category] || 0;
+        fee.totalPaid = paid;
+        fee.remainingBalance = Math.max(0, fee.amount - paid);
+        fee.paid = paid >= fee.amount;
+      });
+
+      updateData.fees = student.fees;
+    }
+
     await Student.findOneAndUpdate(
       { schoolId, studentId: payment.studentId },
-      { totalPaid, remainingBalance, feePaid: totalPaid >= student.feeAmount },
+      updateData,
     );
   }
 }
@@ -617,7 +685,5 @@ module.exports = {
   extractValidPayment,
   detectMemoCollision,
   detectAbnormalPatterns,
-  finalizeConfirmedPayments,
   checkConfirmationStatus,
-  recordPayment,
 };

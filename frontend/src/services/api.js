@@ -1,24 +1,29 @@
 import axios from "axios";
 
-const TIMEOUT_MS = parseInt(
-  process.env.NEXT_PUBLIC_REQUEST_TIMEOUT_MS || "15000",
-  10,
-);
+const TIMEOUT_MS = parseInt(process.env.NEXT_PUBLIC_REQUEST_TIMEOUT_MS || "15000", 10);
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api",
   timeout: TIMEOUT_MS,
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const getStudents = (page = 1, limit = 50) =>
   api.get("/students", { params: { page, limit } });
+export const registerStudent = (data) => api.post("/students", data);
 export const getPaymentSummary = () => api.get("/payments/summary");
-export const getPaymentInstructions = (studentId) =>
-  api.get(`/payments/instructions/${studentId}`);
-export const getStudentPayments = (studentId) =>
-  api.get(`/payments/${studentId}`);
-export const verifyPayment = (txHash) =>
-  api.post("/payments/verify", { txHash });
+export const getPaymentInstructions = (studentId) => api.get(`/payments/instructions/${studentId}`);
+export const getStudentPayments = (studentId) => api.get(`/payments/${studentId}`);
+export const verifyPayment = (txHash) => api.post("/payments/verify", { txHash });
 export const syncPayments = () => api.post("/payments/sync");
 export const getSyncStatus = () => api.get("/payments/sync/status");
 export const getFeeStructures = () => api.get("/fees");
@@ -42,3 +47,9 @@ export const getDisputes = (params = {}) => api.get("/disputes", { params });
 export const getDisputeById = (id) => api.get(`/disputes/${id}`);
 export const resolveDispute = (id, data) =>
   api.patch(`/disputes/${id}/resolve`, data);
+
+// Audit logs
+export const getRecentAuditLogs = (limit = 10) =>
+  api.get("/audit-logs/recent", { params: { limit } });
+export const getAuditLogs = (params = {}) =>
+  api.get("/audit-logs", { params });

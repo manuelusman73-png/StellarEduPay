@@ -29,6 +29,13 @@ let _timer  = null;
 let _running = false;
 
 /**
+ * Check if SMTP is properly configured
+ */
+function isSmtpConfigured() {
+  return !!(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS);
+}
+
+/**
  * Determine whether a student is eligible for a reminder right now.
  */
 function isEligible(student) {
@@ -51,6 +58,12 @@ function isEligible(student) {
  * Returns a summary object for logging / API response.
  */
 async function processReminders() {
+  // Skip if SMTP is not configured
+  if (!isSmtpConfigured()) {
+    logger.warn('SMTP not configured — skipping reminder run');
+    return { schools: 0, eligible: 0, sent: 0, failed: 0, skipped: 0, smtpNotConfigured: true };
+  }
+
   const summary = { schools: 0, eligible: 0, sent: 0, failed: 0, skipped: 0 };
 
   const schools = await School.find({ isActive: true }).lean();
@@ -74,9 +87,7 @@ async function processReminders() {
       summary.eligible++;
 
       try {
-        const nextCount = (student.reminderCount || 0) + 1;
-
-        await sendFeeReminder({
+        const result = await sendFeeReminder({
           to:               student.parentEmail,
           studentName:      student.name,
           studentId:        student.studentId,
@@ -84,17 +95,19 @@ async function processReminders() {
           feeAmount:        student.feeAmount,
           remainingBalance: student.remainingBalance,
           schoolName:       school.name,
-          reminderCount:    nextCount,
+          reminderCount:    (student.reminderCount || 0) + 1,
         });
 
-        // Update tracking fields — use findByIdAndUpdate to avoid triggering
-        // the version-increment pre-save hook unnecessarily
-        await Student.findByIdAndUpdate(student._id, {
-          $set: { lastReminderSentAt: new Date() },
-          $inc: { reminderCount: 1 },
-        });
-
-        summary.sent++;
+        // Only update tracking fields if email was actually sent
+        if (result.sent) {
+          await Student.findByIdAndUpdate(student._id, {
+            $set: { lastReminderSentAt: new Date() },
+            $inc: { reminderCount: 1 },
+          });
+          summary.sent++;
+        } else {
+          summary.skipped++;
+        }
       } catch (err) {
         summary.failed++;
         logger.error('Failed to send reminder', {
@@ -131,6 +144,12 @@ async function runReminders() {
 
 function startReminderScheduler() {
   if (_timer) return;
+  
+  if (!isSmtpConfigured()) {
+    logger.warn('SMTP not configured — reminder scheduler will not start. Set SMTP_HOST, SMTP_USER, SMTP_PASS to enable.');
+    return;
+  }
+  
   logger.info(`Starting — interval: ${REMINDER_INTERVAL_MS}ms, cooldown: ${REMINDER_COOLDOWN_HOURS}h, maxCount: ${REMINDER_MAX_COUNT}`);
   // Do NOT run immediately on startup — wait for the first interval so the
   // server has time to fully initialise and we don't blast emails on every restart.

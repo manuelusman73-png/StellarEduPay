@@ -20,4 +20,13 @@ const strictLimiter = rateLimit({
   message: { error: 'Too many requests to this endpoint, please try again later.', code: 'RATE_LIMIT_EXCEEDED' },
 });
 
-module.exports = { generalLimiter, strictLimiter };
+// Reminder trigger limiter — prevents spamming students with reminder emails
+const reminderTriggerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many reminder trigger requests. Please wait before sending more reminders.', code: 'RATE_LIMIT_EXCEEDED' },
+});
+
+module.exports = { generalLimiter, strictLimiter, reminderTriggerLimiter };

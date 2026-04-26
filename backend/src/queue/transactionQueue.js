@@ -3,14 +3,28 @@
 /**
  * Transaction Processing Queue
  *
- * Handles incoming Stellar transactions asynchronously via BullMQ so that
- * the HTTP layer returns immediately (202 Accepted) and traffic spikes are
- * absorbed by the worker concurrency limit rather than overwhelming the
- * Horizon API or MongoDB.
+ * Durability guarantee: every job is persisted to MongoDB (PendingVerification)
+ * BEFORE being handed to Redis/BullMQ.  If Redis is unavailable the job is still
+ * safe in MongoDB and will be recovered on the next startup via recoverPendingJobs().
+ *
+ * Flow:
+ *   enqueueTransaction(txHash, ctx)
+ *     1. Upsert a PendingVerification document (status=pending, idempotent on txHash)
+ *     2. Try to add the job to BullMQ (Redis).  If Redis is down, log a warning —
+ *        the document stays in MongoDB and will be re-queued on startup.
+ *
+ *   recoverPendingJobs()
+ *     Called once at startup.  Finds all PendingVerification docs with
+ *     status=pending|processing and re-enqueues them into BullMQ so they are
+ *     not silently dropped after a crash or restart.
+ *
+ *   markResolved(txHash) / markDead(txHash, error)
+ *     Called by the worker after a job succeeds or permanently fails.
  */
 
 const { Queue, Worker } = require('bullmq');
 const Redis = require('ioredis');
+const PendingVerification = require('../models/pendingVerificationModel');
 const logger = require('../utils/logger');
 
 const QUEUE_NAME = 'transaction-processing';
@@ -20,36 +34,166 @@ const redisConfig = {
   port: parseInt(process.env.REDIS_PORT, 10) || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
   maxRetriesPerRequest: null, // required by BullMQ
+  // Do not crash the process on Redis errors — we have MongoDB as fallback
+  lazyConnect: true,
+  enableOfflineQueue: false,
 };
 
 // Shared Redis connection for the queue
 const connection = new Redis(redisConfig);
-connection.on('error', (err) => logger.error('[TransactionQueue] Redis error', { error: err.message }));
+connection.on('error', (err) =>
+  logger.error('[TransactionQueue] Redis error', { error: err.message })
+);
 
-const transactionQueue = new Queue(QUEUE_NAME, {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
-    removeOnComplete: { age: 3600, count: 500 },
-    removeOnFail: false,
-  },
-});
+let transactionQueue = null;
+try {
+  transactionQueue = new Queue(QUEUE_NAME, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: { age: 3600, count: 500 },
+      removeOnFail: false,
+    },
+  });
+} catch (err) {
+  logger.error('[TransactionQueue] Failed to create BullMQ queue', { error: err.message });
+}
+
+// ── MongoDB durability helpers ────────────────────────────────────────────────
+
+/**
+ * Persist a job to MongoDB before enqueuing to Redis.
+ * Uses upsert so duplicate calls for the same txHash are safe.
+ */
+async function persistJob(txHash, context = {}) {
+  await PendingVerification.findOneAndUpdate(
+    { txHash },
+    {
+      $setOnInsert: {
+        txHash,
+        schoolId: context.schoolId || 'unknown',
+        studentId: context.studentId || null,
+        status: 'pending',
+        attempts: 0,
+        nextRetryAt: new Date(),
+      },
+    },
+    { upsert: true, new: false }
+  );
+}
+
+/**
+ * Mark a PendingVerification document as resolved (job completed successfully).
+ */
+async function markResolved(txHash) {
+  await PendingVerification.findOneAndUpdate(
+    { txHash },
+    { status: 'resolved', resolvedAt: new Date() }
+  );
+}
+
+/**
+ * Mark a PendingVerification document as dead_letter (permanent failure).
+ */
+async function markDead(txHash, error) {
+  await PendingVerification.findOneAndUpdate(
+    { txHash },
+    {
+      status: 'dead_letter',
+      lastError: error?.message || String(error),
+    }
+  );
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Enqueue a transaction for async processing.
+ *
+ * Durability: the job is written to MongoDB first.  The BullMQ enqueue is
+ * best-effort — if Redis is down the job survives in MongoDB and will be
+ * recovered on the next startup.
+ *
  * @param {string} txHash
  * @param {Object} context  - { schoolId, school, studentId }
- * @returns {Promise<Job>}
+ * @returns {Promise<Job|null>}
  */
 async function enqueueTransaction(txHash, context = {}) {
-  const job = await transactionQueue.add(
-    'verify-transaction',
-    { txHash, ...context },
-    { jobId: txHash } // deduplicate by txHash
-  );
-  logger.info('[TransactionQueue] Enqueued transaction', { txHash, jobId: job.id });
-  return job;
+  // 1. Persist to MongoDB (durable, idempotent)
+  await persistJob(txHash, context);
+
+  // 2. Enqueue to BullMQ (best-effort)
+  if (!transactionQueue) {
+    logger.warn('[TransactionQueue] BullMQ unavailable — job persisted to MongoDB only', { txHash });
+    return null;
+  }
+
+  try {
+    const job = await transactionQueue.add(
+      'verify-transaction',
+      { txHash, ...context },
+      { jobId: txHash } // deduplicate by txHash
+    );
+    logger.info('[TransactionQueue] Enqueued transaction', { txHash, jobId: job.id });
+    return job;
+  } catch (err) {
+    logger.warn('[TransactionQueue] Redis enqueue failed — job persisted to MongoDB only', {
+      txHash,
+      error: err.message,
+    });
+    return null;
+  }
+}
+
+/**
+ * On startup: find all PendingVerification docs that were not resolved before
+ * the last restart and re-enqueue them into BullMQ.
+ *
+ * This covers two scenarios:
+ *   a) Server crashed while jobs were in-flight (status=processing)
+ *   b) Redis was down when jobs were originally submitted (status=pending, never queued)
+ */
+async function recoverPendingJobs() {
+  if (!transactionQueue) {
+    logger.warn('[TransactionQueue] Skipping recovery — BullMQ unavailable');
+    return 0;
+  }
+
+  const unresolved = await PendingVerification.find({
+    status: { $in: ['pending', 'processing'] },
+  }).lean();
+
+  if (!unresolved.length) {
+    logger.info('[TransactionQueue] No pending jobs to recover');
+    return 0;
+  }
+
+  let recovered = 0;
+  for (const doc of unresolved) {
+    try {
+      // Reset processing → pending so the worker picks it up fresh
+      await PendingVerification.findOneAndUpdate(
+        { txHash: doc.txHash, status: 'processing' },
+        { status: 'pending' }
+      );
+
+      await transactionQueue.add(
+        'verify-transaction',
+        { txHash: doc.txHash, schoolId: doc.schoolId, studentId: doc.studentId },
+        { jobId: doc.txHash }
+      );
+      recovered++;
+    } catch (err) {
+      logger.error('[TransactionQueue] Failed to recover job', {
+        txHash: doc.txHash,
+        error: err.message,
+      });
+    }
+  }
+
+  logger.info('[TransactionQueue] Recovery complete', { recovered, total: unresolved.length });
+  return recovered;
 }
 
 /**
@@ -57,6 +201,7 @@ async function enqueueTransaction(txHash, context = {}) {
  * @param {string} txHash
  */
 async function getJobStatus(txHash) {
+  if (!transactionQueue) return null;
   const job = await transactionQueue.getJob(txHash);
   if (!job) return null;
 
@@ -91,7 +236,11 @@ function startTransactionWorker(processor) {
     logger.info('[TransactionQueue] Job completed', { jobId: job.id, txHash: job.data.txHash })
   );
   worker.on('failed', (job, err) =>
-    logger.error('[TransactionQueue] Job failed', { jobId: job?.id, txHash: job?.data?.txHash, error: err.message })
+    logger.error('[TransactionQueue] Job failed', {
+      jobId: job?.id,
+      txHash: job?.data?.txHash,
+      error: err.message,
+    })
   );
 
   logger.info('[TransactionQueue] Worker started', {
@@ -101,4 +250,13 @@ function startTransactionWorker(processor) {
   return worker;
 }
 
-module.exports = { transactionQueue, enqueueTransaction, getJobStatus, startTransactionWorker, QUEUE_NAME };
+module.exports = {
+  transactionQueue,
+  enqueueTransaction,
+  getJobStatus,
+  startTransactionWorker,
+  recoverPendingJobs,
+  markResolved,
+  markDead,
+  QUEUE_NAME,
+};

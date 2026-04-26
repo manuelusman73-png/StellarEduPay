@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const feeAdjustmentRuleSchema = new mongoose.Schema({
-  name: { type: String, required: true, unique: true }, // e.g., "Early Bird Discount", "Late Penalty"
+  schoolId: { type: String, required: true, index: true },
+  name: { type: String, required: true }, // e.g., "Early Bird Discount", "Late Penalty"
   type: { 
     type: String, 
     enum: ['discount_percentage', 'discount_fixed', 'penalty_percentage', 'penalty_fixed', 'waiver'], 
@@ -21,5 +22,7 @@ const feeAdjustmentRuleSchema = new mongoose.Schema({
   priority: { type: Number, default: 10 },      // higher priority applied first
   description: { type: String }
 }, { timestamps: true });
+
+feeAdjustmentRuleSchema.index({ schoolId: 1, name: 1 }, { unique: true });
 
 module.exports = mongoose.model('FeeAdjustmentRule', feeAdjustmentRuleSchema);

@@ -1,182 +1,106 @@
-import { useState, useRef } from 'react';
-import { verifyPayment } from '../services/api';
+import { useState, useRef } from "react";
+import { verifyPayment } from "../services/api";
+
+const STATUS_STYLE = {
+  valid:     { color: "#166534", bg: "#dcfce7" },
+  overpaid:  { color: "#854d0e", bg: "#fef9c3" },
+  underpaid: { color: "#991b1b", bg: "#fee2e2" },
+  unknown:   { color: "#475569", bg: "#f1f5f9" },
+};
 
 export default function VerifyPayment() {
-  const [txHash, setTxHash]   = useState('');
-  const [result, setResult]   = useState(null);
-  const [error, setError]     = useState('');
+  const [txHash, setTxHash] = useState("");
+  const [result, setResult] = useState(null);
+  const [error, setError]   = useState("");
   const [loading, setLoading] = useState(false);
-  const errorRef              = useRef(null);
+  const errorRef = useRef(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError('');
-    setResult(null);
-    setLoading(true);
+    setError(""); setResult(null); setLoading(true);
     try {
       const res = await verifyPayment(txHash.trim());
       setResult(res.data);
     } catch (err) {
-      const msg =
-        err.response?.data?.error ||
-        err.response?.data?.message ||
-        'Verification failed. Please check the transaction hash and try again.';
-      setError(msg);
+      setError(err.response?.data?.error || "Verification failed. Check the transaction hash and try again.");
       errorRef.current?.focus();
     } finally {
       setLoading(false);
     }
   }
 
-  const statusColor = {
-    valid:     '#2e7d32',
-    overpaid:  '#e65100',
-    underpaid: '#c62828',
-    unknown:   '#555',
-  };
+  const st = result?.feeValidation?.status || "unknown";
+  const badge = STATUS_STYLE[st] || STATUS_STYLE.unknown;
 
   return (
-    <div style={{ maxWidth: 480, margin: '2rem auto', fontFamily: 'sans-serif' }}>
-      <h2>Verify Payment</h2>
-      <p style={{ color: '#555', marginTop: 0 }}>
-        Enter your Stellar transaction hash to confirm your payment was recorded.
-      </p>
+    <>
+      <style>{`
+        .vp-wrap { padding: 2rem 0; }
+        .vp-input { width: 100%; padding: 0.65rem 0.85rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: monospace; background: var(--bg); color: var(--text); outline: none; margin-bottom: 0.75rem; }
+        .vp-input:focus { border-color: var(--accent); }
+        .vp-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-top: 1.5rem; }
+        .vp-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.55rem 0; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
+        .vp-row:last-child { border-bottom: none; }
+        .vp-row-label { color: var(--muted); flex-shrink: 0; }
+        .vp-row-val { text-align: right; word-break: break-all; font-family: monospace; }
+      `}</style>
 
-      <form onSubmit={handleSubmit}>
-        <label
-          htmlFor="txHashInput"
-          style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}
-        >
-          Transaction Hash
-        </label>
-        <input
-          id="txHashInput"
-          type="text"
-          placeholder="e.g. 3389e9f0f1a65f19..."
-          value={txHash}
-          onChange={e => setTxHash(e.target.value)}
-          required
-          aria-required="true"
-          aria-describedby={error ? 'verifyError' : undefined}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            marginBottom: '0.5rem',
-            boxSizing: 'border-box',
-            fontFamily: 'monospace',
-          }}
-        />
-        <button type="submit" disabled={loading || !txHash.trim()} style={{ padding: '0.5rem 1rem' }}>
-          {loading ? 'Verifying...' : 'Verify Transaction'}
-        </button>
-      </form>
-
-      {error && (
-        <p
-          id="verifyError"
-          ref={errorRef}
-          role="alert"
-          tabIndex="-1"
-          style={{ color: '#c62828', marginTop: '0.75rem' }}
-        >
-          {error}
+      <div className="vp-wrap">
+        <h2 style={{ marginBottom: "0.25rem" }}>Verify Payment</h2>
+        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginBottom: "1.5rem" }}>
+          Confirm a payment was recorded by entering its transaction hash.
         </p>
-      )}
 
-      {result && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            marginTop: '1.5rem',
-            background: '#f5f5f5',
-            padding: '1rem',
-            borderRadius: 8,
-            borderLeft: '4px solid #2e7d32',
-          }}
-        >
-          <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#2e7d32' }}>
-            ✅ Transaction found
-          </p>
+        <form onSubmit={handleSubmit}>
+          <label htmlFor="txin" style={{ display: "block", fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", marginBottom: "0.4rem" }}>
+            Transaction Hash
+          </label>
+          <input id="txin" type="text" placeholder="e.g. 3389e9f0f1a65f19…"
+            value={txHash} onChange={e => setTxHash(e.target.value)}
+            required className="vp-input"
+          />
+          <button type="submit" disabled={loading || !txHash.trim()} className="btn-primary" style={{ width: "100%" }}>
+            {loading ? "Verifying…" : "Verify Transaction"}
+          </button>
+        </form>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-            <tbody>
-              <tr>
-                <td style={labelCell}>Amount</td>
-                <td style={valueCell}>
-                  {result.amount} {result.assetCode || 'XLM'}
-                </td>
-              </tr>
-              <tr>
-                <td style={labelCell}>Student ID (memo)</td>
-                <td style={{ ...valueCell, fontFamily: 'monospace' }}>{result.memo}</td>
-              </tr>
-              <tr>
-                <td style={labelCell}>Date</td>
-                <td style={valueCell}>
-                  {result.date ? new Date(result.date).toLocaleString() : '—'}
-                </td>
-              </tr>
-              {result.feeValidation && (
-                <tr>
-                  <td style={labelCell}>Fee status</td>
-                  <td
-                    style={{
-                      ...valueCell,
-                      fontWeight: 600,
-                      color: statusColor[result.feeValidation.status] || '#555',
-                    }}
-                  >
-                    {result.feeValidation.status} — {result.feeValidation.message}
-                  </td>
-                </tr>
-              )}
-              {result.networkFee != null && (
-                <tr>
-                  <td style={labelCell}>Network fee</td>
-                  <td style={valueCell}>{result.networkFee} XLM</td>
-                </tr>
-              )}
-              <tr>
-                <td style={labelCell}>Transaction hash</td>
-                <td
-                  style={{
-                    ...valueCell,
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-all',
-                    fontSize: '0.8rem',
-                  }}
-                >
-                  {result.hash}
-                  {result.stellarExplorerUrl && (
-                    <a
-                      href={result.stellarExplorerUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ display: 'inline-block', marginLeft: '0.5rem', fontFamily: 'sans-serif' }}
-                    >
-                      View on Explorer
-                    </a>
-                  )}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+        {error && (
+          <div ref={errorRef} role="alert" tabIndex="-1"
+            style={{ marginTop: "1rem", padding: "0.75rem 1rem", background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 8, color: "#991b1b", fontSize: "0.875rem" }}>
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="vp-card" role="status">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>Transaction Found</span>
+              <span style={{ background: badge.bg, color: badge.color, padding: "0.2rem 0.7rem", borderRadius: 20, fontSize: "0.75rem", fontWeight: 600 }}>
+                {st}
+              </span>
+            </div>
+
+            <div className="vp-row"><span className="vp-row-label">Amount</span><span className="vp-row-val">{result.amount} {result.assetCode || "XLM"}</span></div>
+            <div className="vp-row"><span className="vp-row-label">Memo (Student ID)</span><span className="vp-row-val">{result.memo}</span></div>
+            <div className="vp-row"><span className="vp-row-label">Date</span><span className="vp-row-val" style={{ fontFamily: "inherit" }}>{result.date ? new Date(result.date).toLocaleString() : "—"}</span></div>
+            {result.feeValidation?.message && (
+              <div className="vp-row"><span className="vp-row-label">Note</span><span className="vp-row-val" style={{ fontFamily: "inherit", color: badge.color }}>{result.feeValidation.message}</span></div>
+            )}
+            <div className="vp-row">
+              <span className="vp-row-label">Tx Hash</span>
+              <span className="vp-row-val" style={{ fontSize: "0.78rem" }}>
+                {result.hash}
+                {result.stellarExplorerUrl && (
+                  <a href={result.stellarExplorerUrl} target="_blank" rel="noopener noreferrer"
+                    style={{ display: "block", color: "var(--accent)", fontFamily: "inherit", marginTop: "0.25rem" }}>
+                    View on Explorer ↗
+                  </a>
+                )}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
-
-const labelCell = {
-  padding: '0.35rem 0.5rem 0.35rem 0',
-  color: '#555',
-  verticalAlign: 'top',
-  whiteSpace: 'nowrap',
-  width: '40%',
-};
-
-const valueCell = {
-  padding: '0.35rem 0',
-  verticalAlign: 'top',
-};

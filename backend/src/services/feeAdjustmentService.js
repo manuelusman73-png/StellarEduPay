@@ -12,7 +12,7 @@ class FeeAdjustmentService {
     let finalFee = feeStructure.feeAmount;
     const adjustmentsApplied = [];
 
-    const rules = await FeeAdjustmentRule.find({ isActive: true })
+    const rules = await FeeAdjustmentRule.find({ isActive: true, ...(paymentContext.schoolId ? { schoolId: paymentContext.schoolId } : {}) })
       .sort({ priority: 1 }); // lower number = higher priority
 
     for (const rule of rules) {

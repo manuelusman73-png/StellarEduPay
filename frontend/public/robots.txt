@@ -1,0 +1,13 @@
+# Disallow indexing of sensitive and internal pages
+User-agent: *
+Disallow: /dashboard
+Disallow: /audit-logs
+Disallow: /reports
+Disallow: /test-currency
+
+# Allow public pages
+Allow: /
+Allow: /pay-fees
+
+# Sitemap location
+Sitemap: https://stellaredupay.example.com/sitemap.xml

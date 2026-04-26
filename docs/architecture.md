@@ -357,3 +357,45 @@ Each school has its own `stellarAddress`. The transaction poller fans out to all
 - The `concurrentRequestHandler` middleware adds a circuit breaker (opens after 5 failures, resets after 30s) and a request queue (max 50 concurrent, max 1000 queued) to protect against Horizon API bursts.
 - Idempotency keys prevent duplicate payment processing from retried HTTP requests.
 - Graceful shutdown waits up to 8s for the retry worker to finish its current batch before closing the MongoDB connection.
+
+---
+
+## Content Security Policy (CSP) Strategy
+
+CSP is enforced at two distinct layers, each appropriate to what it serves.
+
+### Frontend (Next.js)
+
+The browser-facing CSP is configured in `frontend/next.config.js` via the `headers()` function. It applies to every route (`/(.*)`):
+
+| Directive | Value | Reason |
+|-----------|-------|--------|
+| `default-src` | `'self'` | Baseline: only same-origin resources |
+| `script-src` | `'self'` | No inline scripts, no eval |
+| `style-src` | `'self'` | No inline styles |
+| `img-src` | `'self' data:` | Allows base64 data URIs for QR codes |
+| `font-src` | `'self'` | Same-origin fonts only |
+| `connect-src` | `'self' https://horizon-testnet.stellar.org https://horizon.stellar.org` | Allows fetch to the backend API and Stellar Horizon |
+| `object-src` | `'none'` | Blocks Flash and plugins |
+| `frame-ancestors` | `'none'` | Prevents clickjacking |
+| `base-uri` | `'self'` | Prevents base tag injection |
+| `form-action` | `'self'` | Restricts form submissions |
+
+`'unsafe-inline'` and `'unsafe-eval'` are intentionally absent.
+
+### Backend (Express / Helmet)
+
+The backend serves only JSON API responses — it never renders HTML, loads scripts, or applies styles. HTML-oriented CSP directives (`scriptSrc`, `styleSrc`, `imgSrc`, etc.) are therefore meaningless here and have been removed.
+
+The backend Helmet CSP is intentionally minimal:
+
+```js
+contentSecurityPolicy: {
+  directives: {
+    defaultSrc: ["'none'"],   // deny everything by default
+    frameAncestors: ["'none'"], // prevent embedding in iframes
+  },
+}
+```
+
+This follows the principle of least privilege: the backend declares that no browser should ever render its responses as a document.

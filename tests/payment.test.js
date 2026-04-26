@@ -2,7 +2,7 @@
 
 // Must set required env vars before app is loaded (config/index.js validates on require)
 process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-process.env.SCHOOL_WALLET_ADDRESS = 'GTEST123';
+process.env.SCHOOL_WALLET_ADDRESS = 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B';
 
 const request = require('supertest');
 
@@ -98,7 +98,7 @@ jest.mock('../backend/src/models/schoolModel', () => ({
       schoolId: 'SCH001',
       name: 'Test School',
       slug: 'test-school',
-      stellarAddress: 'GTEST123',
+      stellarAddress: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B',
       localCurrency: 'USD',
       isActive: true,
     }),
@@ -140,7 +140,7 @@ jest.mock('../backend/src/services/currencyConversionService', () => ({
 }));
 
 jest.mock('../backend/src/config/stellarConfig', () => ({
-  SCHOOL_WALLET: 'GTEST123',
+  SCHOOL_WALLET: 'GCICZOP346CKADPWOZ6JAQ7OCGH44UELNS3GSDXFOTSZRW6OYZZ6KSY7B',
   ACCEPTED_ASSETS: {
     XLM:  { code: 'XLM',  type: 'native',          issuer: null },
     USDC: { code: 'USDC', type: 'credit_alphanum4', issuer: 'GISSUER' },
@@ -232,8 +232,12 @@ describe('Full payment flow', () => {
   test('Step 4 — payment history reflects the transaction', async () => {
     const res = await testApi.get('/api/payments/STU001');
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body[0]).toHaveProperty('txHash', 'abc123');
+    expect(res.body).toHaveProperty('payments');
+    expect(res.body).toHaveProperty('total');
+    expect(res.body).toHaveProperty('page');
+    expect(res.body).toHaveProperty('pages');
+    expect(Array.isArray(res.body.payments)).toBe(true);
+    expect(res.body.payments[0]).toHaveProperty('txHash', 'abc123');
   });
 });
 

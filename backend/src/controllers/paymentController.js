@@ -36,6 +36,7 @@ const {
   enrichPaymentWithConversion,
 } = require("../services/currencyConversionService");
 const { withStellarRetry } = require("../utils/withStellarRetry");
+const { logAudit } = require("../services/auditService");
 
 // Permanent error codes that should NOT be retried
 const PERMANENT_FAIL_CODES = [
@@ -69,20 +70,50 @@ async function getPaymentInstructions(req, res, next) {
   try {
     const limits = getPaymentLimits();
     const targetCurrency = req.school.localCurrency || "USD";
+    const { feeCategory } = req.query;
 
     const student = await Student.findOne({
       schoolId: req.schoolId,
       studentId: req.params.studentId,
     });
 
+    let feeAmount = student ? student.feeAmount : null;
     let feeConversion = null;
-    if (student && student.feeAmount) {
+    let categoryInfo = null;
+
+    // If feeCategory is specified and student has fees array, use that category
+    if (feeCategory && student && student.fees && student.fees.length > 0) {
+      const fee = student.fees.find(f => f.category === feeCategory);
+      if (fee) {
+        feeAmount = fee.amount;
+        categoryInfo = {
+          category: fee.category,
+          amount: fee.amount,
+          paid: fee.paid,
+          totalPaid: fee.totalPaid || 0,
+          remainingBalance: fee.remainingBalance || fee.amount,
+        };
+      }
+    }
+
+    if (feeAmount) {
       feeConversion = await convertToLocalCurrency(
-        student.feeAmount,
+        feeAmount,
         "XLM",
         targetCurrency,
       );
     }
+
+    // Build fees array for response
+    const fees = student && student.fees && student.fees.length > 0
+      ? student.fees.map(f => ({
+        category: f.category,
+        amount: f.amount,
+        paid: f.paid,
+        totalPaid: f.totalPaid || 0,
+        remainingBalance: f.remainingBalance || f.amount,
+      }))
+      : [];
 
     res.json({
       walletAddress: req.school.stellarAddress,
@@ -92,18 +123,23 @@ async function getPaymentInstructions(req, res, next) {
         code: a.code,
         type: a.type,
         displayName: a.displayName,
+        issuer: a.issuer ?? null,
       })),
       paymentLimits: { min: limits.min, max: limits.max },
-      feeAmount: student ? student.feeAmount : null,
+      feeAmount,
+      feeCategory: feeCategory || null,
+      categoryInfo,
+      fees,
       feeLocalEquivalent: feeConversion?.available
         ? {
-            amount: feeConversion.localAmount,
-            currency: feeConversion.currency,
-            rate: feeConversion.rate,
-            rateTimestamp: feeConversion.rateTimestamp,
-          }
+          amount: feeConversion.localAmount,
+          currency: feeConversion.currency,
+          rate: feeConversion.rate,
+          rateTimestamp: feeConversion.rateTimestamp,
+        }
         : null,
-      note: "Include the payment intent memo exactly when sending payment.",
+      note: "Include the payment intent memo exactly when sending payment. The memo must be sent as a text memo (MEMO_TEXT). Other memo types (MEMO_ID, MEMO_HASH, MEMO_RETURN) will not be recognised and your payment will not be matched.",
+      memoType: "text",
     });
   } catch (err) {
     next(err);
@@ -114,7 +150,7 @@ async function getPaymentInstructions(req, res, next) {
 async function createPaymentIntent(req, res, next) {
   try {
     const { schoolId } = req;
-    const { studentId } = req.body;
+    const { studentId, feeCategory } = req.body;
 
     const student = await Student.findOne({ schoolId, studentId });
     if (!student)
@@ -122,8 +158,31 @@ async function createPaymentIntent(req, res, next) {
         .status(404)
         .json({ error: "Student not found", code: "NOT_FOUND" });
 
+    let feeAmount = student.feeAmount;
+    let categoryInfo = null;
+
+    // If feeCategory is specified and student has fees array, use that category
+    if (feeCategory && student.fees && student.fees.length > 0) {
+      const fee = student.fees.find(f => f.category === feeCategory);
+      if (fee) {
+        feeAmount = fee.amount;
+        categoryInfo = {
+          category: fee.category,
+          amount: fee.amount,
+          paid: fee.paid,
+          totalPaid: fee.totalPaid || 0,
+          remainingBalance: fee.remainingBalance || fee.amount,
+        };
+      } else {
+        return res.status(400).json({
+          error: `Fee category '${feeCategory}' not found for student`,
+          code: "INVALID_FEE_CATEGORY",
+        });
+      }
+    }
+
     const { validatePaymentAmount } = require("../utils/paymentLimits");
-    const limitValidation = validatePaymentAmount(student.feeAmount);
+    const limitValidation = validatePaymentAmount(feeAmount);
     if (!limitValidation.valid) {
       return res.status(400).json({
         error: limitValidation.error,
@@ -140,14 +199,18 @@ async function createPaymentIntent(req, res, next) {
     const intent = await PaymentIntent.create({
       schoolId,
       studentId,
-      amount: student.feeAmount,
+      amount: feeAmount,
+      feeCategory: feeCategory || null,
       memo,
       status: "PENDING",
       expiresAt,
       startedAt: new Date(),
     });
 
-    res.status(201).json(intent);
+    res.status(201).json({
+      ...intent.toObject(),
+      categoryInfo,
+    });
   } catch (err) {
     next(err);
   }
@@ -278,12 +341,30 @@ async function submitTransaction(req, res, next) {
  *   502 — STELLAR_NETWORK_ERROR
  */
 async function verifyPayment(req, res, next) {
+  const startTime = Date.now();
+  const ipAddress = req.ip || req.connection?.remoteAddress || null;
+  const userAgent = req.get('user-agent') || null;
+  
   try {
     const { schoolId } = req;
     const { txHash } = req.body;
 
     const hashValidation = validateTransactionHash(txHash);
     if (!hashValidation.valid) {
+      // Log failed validation attempt
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: txHash,
+        targetType: 'payment',
+        details: { txHash, validationError: hashValidation.error },
+        result: 'failure',
+        errorMessage: hashValidation.error,
+        ipAddress,
+        userAgent,
+      });
+      
       const err = new Error(hashValidation.error);
       err.code = hashValidation.code;
       return next(err);
@@ -291,13 +372,60 @@ async function verifyPayment(req, res, next) {
 
     const normalizedHash = hashValidation.normalized;
 
+    // Check if payment already exists (idempotency)
     const existing = await Payment.findOne({ txHash: normalizedHash });
     if (existing) {
-      const err = new Error(
-        "Transaction " + normalizedHash + " has already been processed",
+      // Log cached verification
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: normalizedHash,
+        targetType: 'payment',
+        details: { txHash: normalizedHash, cached: true, studentId: existing.studentId, amount: existing.amount },
+        result: 'success',
+        ipAddress,
+        userAgent,
+      });
+      
+      // Return cached result instead of error
+      const targetCurrency = req.school.localCurrency || "USD";
+      const conversion = await convertToLocalCurrency(
+        existing.amount,
+        existing.assetCode || "XLM",
+        targetCurrency,
       );
-      err.code = "DUPLICATE_TX";
-      return next(err);
+
+      const stellarExplorerUrl = getExplorerUrl(existing.txHash);
+      
+      return res.json({
+        verified: true,
+        cached: true,
+        hash: existing.txHash,
+        stellarExplorerUrl,
+        explorerUrl: stellarExplorerUrl,
+        memo: existing.memo,
+        studentId: existing.studentId,
+        amount: existing.amount,
+        assetCode: existing.assetCode,
+        assetType: existing.assetType,
+        feeAmount: existing.feeAmount,
+        feeValidation: {
+          status: existing.feeValidationStatus,
+          excessAmount: existing.excessAmount,
+        },
+        networkFee: existing.networkFee || null,
+        date: existing.confirmedAt || existing.createdAt,
+        status: existing.status,
+        confirmationStatus: existing.confirmationStatus,
+        localCurrency: {
+          amount: conversion.available ? conversion.localAmount : null,
+          currency: conversion.currency,
+          rate: conversion.rate,
+          rateTimestamp: conversion.rateTimestamp,
+          available: conversion.available,
+        },
+      });
     }
 
     let result;
@@ -308,6 +436,20 @@ async function verifyPayment(req, res, next) {
       );
     } catch (stellarErr) {
       if (PERMANENT_FAIL_CODES.includes(stellarErr.code)) {
+        // Log permanent failure
+        await logAudit({
+          schoolId,
+          action: 'payment_verify',
+          performedBy: req.user?.email || req.user?.id || 'anonymous',
+          targetId: normalizedHash,
+          targetType: 'payment',
+          details: { txHash: normalizedHash, errorCode: stellarErr.code },
+          result: 'failure',
+          errorMessage: stellarErr.message,
+          ipAddress,
+          userAgent,
+        });
+        
         await Payment.create({
           schoolId,
           studentId: "unknown",
@@ -315,10 +457,23 @@ async function verifyPayment(req, res, next) {
           amount: 0,
           status: "FAILED",
           feeValidationStatus: "unknown",
-        }).catch(() => {});
+        }).catch(() => { });
         return next(stellarErr);
       }
 
+      // Log queued for retry
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: normalizedHash,
+        targetType: 'payment',
+        details: { txHash: normalizedHash, queuedForRetry: true, reason: stellarErr.message },
+        result: 'success',
+        ipAddress,
+        userAgent,
+      });
+      
       await queueForRetry(
         normalizedHash,
         req.body.studentId || null,
@@ -334,6 +489,20 @@ async function verifyPayment(req, res, next) {
     }
 
     if (!result) {
+      // Log not found
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: normalizedHash,
+        targetType: 'payment',
+        details: { txHash: normalizedHash },
+        result: 'failure',
+        errorMessage: 'Transaction found but contains no valid payment to this school wallet',
+        ipAddress,
+        userAgent,
+      });
+      
       return res.status(404).json({
         error:
           "Transaction found but contains no valid payment to this school wallet",
@@ -344,6 +513,20 @@ async function verifyPayment(req, res, next) {
     const studentStrId = result.studentId || result.memo;
     const studentObj = await Student.findOne({ studentId: studentStrId });
     if (!studentObj) {
+      // Log student not found
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: normalizedHash,
+        targetType: 'payment',
+        details: { txHash: normalizedHash, studentId: studentStrId },
+        result: 'failure',
+        errorMessage: 'Associated student not found',
+        ipAddress,
+        userAgent,
+      });
+      
       return res.status(404).json({
         error: "Associated student not found. Cannot record transaction.",
       });
@@ -352,6 +535,21 @@ async function verifyPayment(req, res, next) {
     const intent = await PaymentIntent.findOne({ memo: result.memo, schoolId });
     if (intent && intent.expiresAt && intent.expiresAt < new Date()) {
       await PaymentIntent.findByIdAndUpdate(intent._id, { status: "expired" });
+      
+      // Log expired intent
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: normalizedHash,
+        targetType: 'payment',
+        details: { txHash: normalizedHash, intentExpired: true },
+        result: 'failure',
+        errorMessage: 'Payment intent has expired',
+        ipAddress,
+        userAgent,
+      });
+      
       const err = new Error(
         "Payment intent has expired. Please request new payment instructions.",
       );
@@ -361,6 +559,26 @@ async function verifyPayment(req, res, next) {
     }
 
     if (result.feeValidation.status === "underpaid") {
+      // Log underpayment
+      await logAudit({
+        schoolId,
+        action: 'payment_verify',
+        performedBy: req.user?.email || req.user?.id || 'anonymous',
+        targetId: normalizedHash,
+        targetType: 'payment',
+        details: { 
+          txHash: normalizedHash, 
+          studentId: studentStrId,
+          amount: result.amount,
+          required: result.feeAmount,
+          underpaid: true 
+        },
+        result: 'failure',
+        errorMessage: result.feeValidation.message,
+        ipAddress,
+        userAgent,
+      });
+      
       const err = new Error(result.feeValidation.message);
       err.code = "UNDERPAID";
       err.status = 400;
@@ -391,6 +609,40 @@ async function verifyPayment(req, res, next) {
       verifiedAt: now,
     });
 
+    // Log successful verification
+    const duration = Date.now() - startTime;
+    await logAudit({
+      schoolId,
+      action: 'payment_verify',
+      performedBy: req.user?.email || req.user?.id || 'anonymous',
+      targetId: normalizedHash,
+      targetType: 'payment',
+      details: { 
+        txHash: normalizedHash,
+        studentId: result.studentId || result.memo,
+        amount: result.amount,
+        assetCode: result.assetCode || 'XLM',
+        feeValidationStatus: result.feeValidation.status,
+        duration: `${duration}ms`
+      },
+      result: 'success',
+      ipAddress,
+      userAgent,
+    });
+
+    // Auto-generate receipt on payment success (fire-and-forget; never blocks the response)
+    createReceipt({
+      txHash: result.hash,
+      studentId: result.studentId || result.memo,
+      schoolId,
+      amount: result.amount,
+      assetCode: result.assetCode || 'XLM',
+      feeAmount: result.feeAmount,
+      feeValidationStatus: result.feeValidation.status,
+      memo: result.memo,
+      confirmedAt: result.date ? new Date(result.date) : now,
+    }).catch(() => { /* receipt failure must not break the payment response */ });
+
     const targetCurrency = req.school.localCurrency || "USD";
     const conversion = await convertToLocalCurrency(
       result.amount,
@@ -401,6 +653,7 @@ async function verifyPayment(req, res, next) {
     const stellarExplorerUrl = getExplorerUrl(result.hash);
     res.json({
       verified: true,
+      cached: false,
       hash: result.hash,
       stellarExplorerUrl,
       explorerUrl: stellarExplorerUrl,
@@ -422,6 +675,20 @@ async function verifyPayment(req, res, next) {
       },
     });
   } catch (err) {
+    // Log unexpected errors
+    await logAudit({
+      schoolId: req.schoolId,
+      action: 'payment_verify',
+      performedBy: req.user?.email || req.user?.id || 'anonymous',
+      targetId: req.body?.txHash || 'unknown',
+      targetType: 'payment',
+      details: { error: err.message, stack: err.stack },
+      result: 'failure',
+      errorMessage: err.message,
+      ipAddress,
+      userAgent,
+    }).catch(() => { /* audit failure must not block error handling */ });
+    
     next(err);
   }
 }
@@ -460,9 +727,53 @@ async function syncAllPayments(req, res, next) {
   }
   _syncLocks.add(schoolId);
   try {
-    await syncPaymentsForSchool(req.school);
+    const summary = await syncPaymentsForSchool(req.school);
+    res.json({
+      message: "Sync complete",
+      summary: {
+        found:           summary.found,
+        new:             summary.new,
+        matched:         summary.matched,
+        unmatched:       summary.unmatched,
+        failed:          summary.failed,
+        alreadyProcessed: summary.alreadyProcessed,
+        failedDetails:   summary.failedDetails,
+      },
+    });
+    const result = await syncPaymentsForSchool(req.school);
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'payment_manual_sync',
+        performedBy: req.auditContext.performedBy,
+        targetId: schoolId,
+        targetType: 'payment',
+        details: { syncResult: result },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: "Sync complete" });
   } catch (err) {
+    // Audit log for failure
+    if (req.auditContext) {
+      await logAudit({
+        schoolId,
+        action: 'payment_manual_sync',
+        performedBy: req.auditContext.performedBy,
+        targetId: schoolId,
+        targetType: 'payment',
+        details: {},
+        result: 'failure',
+        errorMessage: err.message,
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
     next(wrapStellarError(err));
   } finally {
     _syncLocks.delete(schoolId);
@@ -484,7 +795,23 @@ async function getSyncStatus(req, res, next) {
 
 async function finalizePayments(req, res, next) {
   try {
-    await finalizeConfirmedPayments(req.schoolId);
+    const result = await finalizeConfirmedPayments(req.schoolId);
+
+    // Audit log
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: req.schoolId,
+        action: 'payment_finalize',
+        performedBy: req.auditContext.performedBy,
+        targetId: req.schoolId,
+        targetType: 'payment',
+        details: { finalizeResult: result },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
     res.json({ message: "Finalization complete" });
   } catch (err) {
     next(err);
@@ -497,11 +824,24 @@ async function getStudentPayments(req, res, next) {
     const network =
       process.env.STELLAR_NETWORK === "mainnet" ? "public" : "testnet";
 
+    // Pagination parameters
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination metadata
+    const total = await Payment.countDocuments({
+      schoolId: req.schoolId,
+      studentId: req.params.studentId,
+    });
+
     const payments = await Payment.find({
       schoolId: req.schoolId,
       studentId: req.params.studentId,
     })
       .sort({ confirmedAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .lean();
 
     const enriched = await Promise.all(
@@ -514,7 +854,15 @@ async function getStudentPayments(req, res, next) {
         return { ...converted, explorerUrl };
       }),
     );
-    res.json(enriched);
+
+    const pages = Math.ceil(total / limit);
+
+    res.json({
+      payments: enriched,
+      total,
+      page,
+      pages,
+    });
   } catch (err) {
     next(err);
   }
@@ -607,12 +955,50 @@ async function getStudentBalance(req, res, next) {
     const buildLocal = (conv) =>
       conv.available
         ? {
-            amount: conv.localAmount,
-            currency: conv.currency,
-            rate: conv.rate,
-            rateTimestamp: conv.rateTimestamp,
-          }
+          amount: conv.localAmount,
+          currency: conv.currency,
+          rate: conv.rate,
+          rateTimestamp: conv.rateTimestamp,
+        }
         : null;
+
+    // Build per-category breakdown if fees array exists
+    let categoryBreakdown = [];
+    if (student.fees && student.fees.length > 0) {
+      // Get payments grouped by fee category
+      const categoryPayments = await Payment.aggregate([
+        { $match: { schoolId, studentId, feeCategory: { $ne: null } } },
+        {
+          $group: {
+            _id: "$feeCategory",
+            totalPaid: { $sum: "$amount" },
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+
+      const categoryPaymentMap = {};
+      categoryPayments.forEach(cp => {
+        categoryPaymentMap[cp._id] = {
+          totalPaid: parseFloat(cp.totalPaid.toFixed(7)),
+          installmentCount: cp.count,
+        };
+      });
+
+      categoryBreakdown = student.fees.map(fee => {
+        const paid = categoryPaymentMap[fee.category] || { totalPaid: 0, installmentCount: 0 };
+        const remaining = Math.max(0, fee.amount - paid.totalPaid);
+        return {
+          category: fee.category,
+          amount: fee.amount,
+          totalPaid: paid.totalPaid,
+          remainingBalance: remaining,
+          paid: paid.totalPaid >= fee.amount,
+          installmentCount: paid.installmentCount,
+          paymentDeadline: fee.paymentDeadline,
+        };
+      });
+    }
 
     res.json({
       studentId,
@@ -622,6 +1008,7 @@ async function getStudentBalance(req, res, next) {
       excessAmount,
       feePaid: totalPaid >= student.feeAmount,
       installmentCount: result.length ? result[0].count : 0,
+      categoryBreakdown,
       localCurrency: {
         currency: targetCurrency,
         available: feeConv.available,
@@ -661,7 +1048,7 @@ async function getPendingPayments(req, res, next) {
 }
 
 // GET /api/payments/retry-queue
-async function getRetryQueue(req, res) {
+async function getRetryQueue(req, res, next) {
   try {
     if (
       !PendingVerification ||
@@ -694,7 +1081,7 @@ async function getRetryQueue(req, res) {
       recently_resolved: { count: resolved.length, items: resolved },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 }
 
@@ -841,6 +1228,7 @@ async function getAllPayments(req, res, next) {
 // ====================== OTHER FUNCTIONS (kept as-is, just cleaned) ======================
 
 const Receipt = require("../models/receiptModel");
+const { createReceipt } = require("../services/receiptService");
 
 async function generateReceipt(req, res, next) {
   try {
@@ -1010,7 +1398,7 @@ async function getPaymentSummary(req, res, next) {
   try {
     const { schoolId } = req;
 
-    const [studentStats, xlmStats] = await Promise.all([
+    const [studentStats, xlmStats, categoryStats] = await Promise.all([
       Student.aggregate([
         { $match: { schoolId, deletedAt: null } },
         {
@@ -1026,6 +1414,17 @@ async function getPaymentSummary(req, res, next) {
         { $match: { schoolId, status: "SUCCESS", deletedAt: null } },
         { $group: { _id: null, totalXlmCollected: { $sum: "$amount" } } },
       ]),
+      // Get per-category statistics
+      Payment.aggregate([
+        { $match: { schoolId, status: "SUCCESS", deletedAt: null, feeCategory: { $ne: null } } },
+        {
+          $group: {
+            _id: "$feeCategory",
+            totalCollected: { $sum: "$amount" },
+            paymentCount: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const s = studentStats[0] || {
@@ -1035,11 +1434,19 @@ async function getPaymentSummary(req, res, next) {
     };
     const x = xlmStats[0] || { totalXlmCollected: 0 };
 
+    // Build category breakdown
+    const categoryBreakdown = categoryStats.map(cat => ({
+      category: cat._id,
+      totalCollected: parseFloat(cat.totalCollected.toFixed(7)),
+      paymentCount: cat.paymentCount,
+    }));
+
     res.json({
       totalStudents: s.totalStudents,
       paidCount: s.paidCount,
       unpaidCount: s.unpaidCount,
       totalXlmCollected: parseFloat(x.totalXlmCollected.toFixed(7)),
+      categoryBreakdown,
     });
   } catch (err) {
     next(err);

@@ -1,0 +1,10 @@
+<p>Dear Parent/Guardian,</p>
+<p>This is a reminder that school fees for <strong>{{studentName}}</strong> (ID: <code>{{studentId}}</code>, Class: <strong>{{className}}</strong>) are outstanding.</p>
+<table style="border-collapse:collapse;margin:16px 0;">
+  <tr><td style="padding:4px 12px 4px 0;color:#555;">School</td><td><strong>{{schoolName}}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#555;">Fee Amount</td><td>{{feeAmount}}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#555;">Amount Due</td><td><strong>{{outstanding}}</strong></td></tr>
+</table>
+<p>Please arrange payment at your earliest convenience to avoid any disruption to your child's education.</p>
+{{#if reminderNote}}<p><em>{{reminderNote}}</em></p>{{/if}}
+<p>Thank you,<br/><strong>{{schoolName}} Administration</strong></p>

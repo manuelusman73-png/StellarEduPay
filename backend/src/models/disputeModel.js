@@ -20,8 +20,8 @@ const disputeSchema = new mongoose.Schema(
     studentId:   { type: String, required: true, index: true },
 
     // Who raised the dispute and why
-    raisedBy:    { type: String, required: true, trim: true },   // e.g. parent name / admin ID
-    reason:      { type: String, required: true, trim: true },   // free-text description
+    raisedBy:    { type: String, required: true, trim: true, maxlength: 200 },   // e.g. parent name / admin ID
+    reason:      { type: String, required: true, trim: true, maxlength: 1000 },   // free-text description
 
     status: {
       type: String,

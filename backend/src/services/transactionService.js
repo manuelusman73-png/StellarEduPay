@@ -1,98 +1,56 @@
 "use strict";
 
+const Payment = require("../models/paymentModel");
+const { generateReferenceCode } = require("../utils/generateReferenceCode");
+const logger = require("../utils/logger").child("TransactionService");
+
 /**
- * Auto-sync service
- *
- * Polls all active schools' Stellar wallets on a configurable interval.
- *
- * Configuration:
- *   SYNC_INTERVAL_MS  — polling interval in ms (default: 60000).
- *                       Set to 0 to disable auto-sync entirely.
- *                       Falls back to POLL_INTERVAL_MS for backwards compatibility.
- *
- * Manual sync (POST /api/payments/sync) works independently and is unaffected.
+ * Persist a payment record, enforcing uniqueness on txHash.
+ * Throws DUPLICATE_TX if already recorded.
+ * data must include schoolId.
  */
-
-const School = require("../models/schoolModel");
-const { syncPaymentsForSchool } = require("./stellarService");
-const { SYNC_INTERVAL_MS } = require("../config");
-const logger = require("../utils/logger").child("AutoSync");
-
-let _timer = null;
-
-async function runSyncCycle() {
-  const startedAt = new Date().toISOString();
-
-  let schools;
+async function savePayment(data) {
+  const exists = await Payment.findOne({
+    transactionHash: data.transactionHash,
+  });
+  if (exists) {
+    const err = new Error(
+      `Transaction ${data.transactionHash} has already been processed`,
+    );
+    err.code = "DUPLICATE_TX";
+    throw err;
+  }
+  if (!data.referenceCode) {
+    data = { ...data, referenceCode: await generateReferenceCode() };
+  }
   try {
-    schools = await School.find({ isActive: true }).lean();
-  } catch (err) {
-    logger.error("Failed to fetch active schools", { error: err.message });
-    return;
-  }
-
-  if (schools.length === 0) {
-    logger.debug("Auto-sync: no active schools");
-    return;
-  }
-
-  const results = await Promise.allSettled(
-    schools.map((s) => syncPaymentsForSchool(s)),
-  );
-
-  let totalNew = 0;
-  results.forEach((result, i) => {
-    if (result.status === "fulfilled") {
-      const { newPayments = 0 } = result.value || {};
-      totalNew += newPayments;
-      if (newPayments > 0) {
-        logger.info("Auto-sync: new payments detected", {
-          schoolId: schools[i].schoolId,
-          newPayments,
-          timestamp: startedAt,
-        });
-      }
-    } else {
-      logger.error("Auto-sync: school sync failed", {
-        schoolId: schools[i].schoolId,
-        error: result.reason?.message,
-        timestamp: startedAt,
+    return await Payment.create(data);
+  } catch (e) {
+    if (e.code === 11000) {
+      const err = new Error(
+        `Transaction ${data.transactionHash} has already been processed`,
+      );
+      err.code = "DUPLICATE_TX";
+      logger.warn("Duplicate transaction rejected", {
+        txHash: data.transactionHash,
+        schoolId: data.schoolId,
       });
+      throw err;
     }
-  });
-
-  logger.info("Auto-sync cycle complete", {
-    timestamp: startedAt,
-    schools: schools.length,
-    newPayments: totalNew,
-  });
-}
-
-function startPolling() {
-  if (SYNC_INTERVAL_MS === 0) {
-    logger.info("Auto-sync disabled (SYNC_INTERVAL_MS=0)");
-    return;
-  }
-
-  if (_timer) {
-    logger.warn("Auto-sync already running");
-    return;
-  }
-
-  logger.info(`Auto-sync starting — interval: ${SYNC_INTERVAL_MS}ms`);
-
-  // Run immediately on startup, then on each interval
-  runSyncCycle();
-  _timer = setInterval(runSyncCycle, SYNC_INTERVAL_MS);
-  _timer.unref(); // don't block process exit
-}
-
-function stopPolling() {
-  if (_timer) {
-    clearInterval(_timer);
-    _timer = null;
-    logger.info("Auto-sync stopped");
+    logger.error("Failed to record payment", {
+      error: e.message,
+      txHash: data.transactionHash,
+      schoolId: data.schoolId,
+    });
+    throw e;
   }
 }
 
-module.exports = { startPolling, stopPolling };
+/**
+ * Retrieve all payments for a given student, sorted by most recent first.
+ */
+async function getPaymentsByStudent(studentId) {
+  return Payment.find({ studentId }).sort({ confirmedAt: -1 }).lean();
+}
+
+module.exports = { savePayment, getPaymentsByStudent };

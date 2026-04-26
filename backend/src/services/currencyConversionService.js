@@ -4,8 +4,9 @@
  * currencyConversionService — converts XLM and USDC amounts to local currency equivalents.
  *
  * Design decisions:
- *   - Uses CoinGecko's free public API (/simple/price) — no API key required.
+ *   - Uses CoinGecko's API (/simple/price) — supports optional API key for Pro tier.
  *   - Per-currency in-memory cache with configurable TTL (default 60 s).
+ *   - Request deduplication: concurrent requests for same currency share one HTTP call.
  *   - Supports both XLM and USDC asset codes (the two accepted assets in StellarEduPay).
  *   - Graceful degradation: if the price feed is unavailable, fiat fields are null
  *     and `available: false` is returned — callers display XLM-only without crashing.
@@ -17,12 +18,20 @@ const https = require("https");
 // ── Cache ────────────────────────────────────────────────────────────────────
 
 const CACHE_TTL_MS = parseInt(process.env.PRICE_CACHE_TTL_MS || "60000", 10);
+const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY || null;
 
 /**
  * Cache structure (keyed by uppercase currency code):
  *   rateCache['USD'] = { rates: { XLM: 0.24, USDC: 1.00 }, fetchedAt: Date }
  */
 const rateCache = {};
+
+/**
+ * In-flight request deduplication map.
+ * Prevents concurrent requests for the same currency from hitting the API multiple times.
+ * Structure: inFlightRequests['USD'] = Promise<{ rates, fetchedAt }>
+ */
+const inFlightRequests = {};
 
 /** Exposed for testing — resets the in-memory cache. */
 function resetCache() {
@@ -78,13 +87,20 @@ function httpsGet(url) {
  * Fetch rates for both XLM and USDC against targetCurrency from CoinGecko.
  * CoinGecko IDs: stellar = XLM, usd-coin = USDC.
  *
+ * Uses Pro API endpoint if COINGECKO_API_KEY is set, otherwise uses free tier.
+ *
  * @param {string} currency  Lowercase ISO 4217 code (e.g. "usd", "pgk", "ngn")
  * @returns {Promise<{ XLM: number, USDC: number }>}
  */
 async function fetchRatesFromCoinGecko(currency) {
-  const url =
+  let url =
     "https://api.coingecko.com/api/v3/simple/price" +
     `?ids=stellar%2Cusd-coin&vs_currencies=${encodeURIComponent(currency)}`;
+
+  // Add API key header if available (Pro tier)
+  if (COINGECKO_API_KEY) {
+    url += `&x_cg_pro_api_key=${encodeURIComponent(COINGECKO_API_KEY)}`;
+  }
 
   const data = await httpsGet(url);
 
@@ -108,6 +124,8 @@ async function fetchRatesFromCoinGecko(currency) {
 
 /**
  * Return cached rates if fresh, otherwise fetch and cache.
+ * Implements request deduplication: concurrent calls for the same currency
+ * share a single in-flight HTTP request.
  * Returns null (without throwing) if the price feed is unavailable —
  * callers handle this via graceful degradation.
  *
@@ -122,21 +140,44 @@ async function getRates(currency) {
     return cached;
   }
 
-  try {
-    const rates = await fetchRatesFromCoinGecko(key.toLowerCase());
-    const entry = { rates, fetchedAt: new Date() };
-    rateCache[key] = entry;
-    return entry;
-  } catch (err) {
-    console.warn("[CurrencyConversion] Price feed unavailable:", err.message);
-    // Return stale cache if present rather than nothing
-    if (cached) {
-      console.warn(
-        "[CurrencyConversion] Serving stale rate from",
-        cached.fetchedAt.toISOString(),
-      );
-      return cached;
+  // Request deduplication: if a request is already in-flight, wait for it
+  if (inFlightRequests[key]) {
+    try {
+      return await inFlightRequests[key];
+    } catch (err) {
+      // If in-flight request failed, fall through to retry
+      delete inFlightRequests[key];
     }
+  }
+
+  // Create new in-flight request
+  const fetchPromise = (async () => {
+    try {
+      const rates = await fetchRatesFromCoinGecko(key.toLowerCase());
+      const entry = { rates, fetchedAt: new Date() };
+      rateCache[key] = entry;
+      delete inFlightRequests[key];
+      return entry;
+    } catch (err) {
+      delete inFlightRequests[key];
+      console.warn("[CurrencyConversion] Price feed unavailable:", err.message);
+      // Return stale cache if present rather than nothing
+      if (cached) {
+        console.warn(
+          "[CurrencyConversion] Serving stale rate from",
+          cached.fetchedAt.toISOString(),
+        );
+        return cached;
+      }
+      throw err;
+    }
+  })();
+
+  inFlightRequests[key] = fetchPromise;
+
+  try {
+    return await fetchPromise;
+  } catch (err) {
     return null;
   }
 }

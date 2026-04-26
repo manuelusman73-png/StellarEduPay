@@ -2,9 +2,9 @@
 
 /**
  * Structured Logger Utility
- * 
+ *
  * Provides consistent logging with levels, timestamps, and context.
- * Can be easily swapped for a more robust solution like Winston or Pino.
+ * Supports runtime log level changes via setLevel() — no server restart needed.
  */
 
 const LOG_LEVELS = {
@@ -14,25 +14,48 @@ const LOG_LEVELS = {
   DEBUG: 3,
 };
 
-const currentLevel = process.env.LOG_LEVEL || 'INFO';
+const VALID_LEVELS = Object.keys(LOG_LEVELS);
+
+// Mutable runtime level — starts from env var, can be changed via setLevel()
+let _currentLevel = (process.env.LOG_LEVEL || 'INFO').toUpperCase();
+if (!VALID_LEVELS.includes(_currentLevel)) {
+  _currentLevel = 'INFO';
+}
+
+/**
+ * Set the log level at runtime. Takes effect immediately for all subsequent calls.
+ * @param {string} level - One of 'debug' | 'info' | 'warn' | 'error' (case-insensitive)
+ * @throws {Error} if level is invalid
+ */
+function setLevel(level) {
+  const upper = (level || '').toUpperCase();
+  if (!VALID_LEVELS.includes(upper)) {
+    throw new Error(`Invalid log level "${level}". Must be one of: ${VALID_LEVELS.join(', ').toLowerCase()}`);
+  }
+  _currentLevel = upper;
+}
+
+/**
+ * Get the current log level.
+ * @returns {string} current level in lowercase
+ */
+function getLevel() {
+  return _currentLevel.toLowerCase();
+}
 
 function shouldLog(level) {
-  return LOG_LEVELS[level] <= LOG_LEVELS[currentLevel];
+  return LOG_LEVELS[level] <= LOG_LEVELS[_currentLevel];
 }
 
 function formatMessage(level, message, ...args) {
   const timestamp = new Date().toISOString();
   const formattedArgs = args.map(arg => {
     if (arg instanceof Error) {
-      return {
-        message: arg.message,
-        stack: arg.stack,
-        ...arg,
-      };
+      return { message: arg.message, stack: arg.stack, ...arg };
     }
     return arg;
   });
-  
+
   return {
     timestamp,
     level,
@@ -45,44 +68,45 @@ function formatMessage(level, message, ...args) {
 const logger = {
   error(message, ...args) {
     if (shouldLog('ERROR')) {
-      const formatted = formatMessage('ERROR', message, ...args);
-      console.error(JSON.stringify(formatted));
+      console.error(JSON.stringify(formatMessage('ERROR', message, ...args)));
     }
   },
-  
+
   warn(message, ...args) {
     if (shouldLog('WARN')) {
-      const formatted = formatMessage('WARN', message, ...args);
-      console.warn(JSON.stringify(formatted));
+      console.warn(JSON.stringify(formatMessage('WARN', message, ...args)));
     }
   },
-  
+
   info(message, ...args) {
     if (shouldLog('INFO')) {
-      const formatted = formatMessage('INFO', message, ...args);
-      console.log(JSON.stringify(formatted));
+      console.log(JSON.stringify(formatMessage('INFO', message, ...args)));
     }
   },
-  
+
   debug(message, ...args) {
     if (shouldLog('DEBUG')) {
-      const formatted = formatMessage('DEBUG', message, ...args);
-      console.log(JSON.stringify(formatted));
+      console.log(JSON.stringify(formatMessage('DEBUG', message, ...args)));
     }
   },
-  
+
   /**
-   * Create a child logger with additional context
+   * Create a child logger with additional context prefix.
    */
   child(context) {
     return {
       error: (message, ...args) => logger.error(`[${context}] ${message}`, ...args),
-      warn: (message, ...args) => logger.warn(`[${context}] ${message}`, ...args),
-      info: (message, ...args) => logger.info(`[${context}] ${message}`, ...args),
+      warn:  (message, ...args) => logger.warn(`[${context}] ${message}`, ...args),
+      info:  (message, ...args) => logger.info(`[${context}] ${message}`, ...args),
       debug: (message, ...args) => logger.debug(`[${context}] ${message}`, ...args),
     };
   },
+
+  setLevel,
+  getLevel,
 };
 
 module.exports = logger;
-module.exports.logger = logger; // named export for destructured imports
+module.exports.logger = logger;
+module.exports.setLevel = setLevel;
+module.exports.getLevel = getLevel;
