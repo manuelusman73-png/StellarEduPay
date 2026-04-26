@@ -6,7 +6,7 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "seed": "node ../scripts/seed-test-data.js",
-    "create-wallet": "node ../scripts/create-school-wallet.js"
+    "create-wallet": "node ../scripts/create-school-wallet.js",
     "test": "jest --testPathPattern=tests/"
   },
   "dependencies": {

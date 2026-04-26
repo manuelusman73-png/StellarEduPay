@@ -121,6 +121,8 @@ async function detectMemoCollision(
         ") within the last 24 hours",
     };
   }
+
+  return { suspicious: false, reason: null };
 }
 
 /**
@@ -382,18 +384,6 @@ async function syncPaymentsForSchool(school) {
       if (!student) { summary.unmatched++; continue; }
 
       summary.matched++;
-      const intent = await PaymentIntent.findOne({
-        schoolId,
-        memo,
-        status: "pending",
-      });
-      if (!intent) continue;
-
-      const student = await Student.findOne({
-        schoolId,
-        studentId: intent.studentId,
-      });
-      if (!student) continue;
 
       const paymentAmount = parseFloat(payOp.amount);
 
@@ -435,7 +425,7 @@ async function syncPaymentsForSchool(school) {
       );
 
       let cumulativeStatus;
-      if (cumulativeTotal < student.feeAmount) cumulativeStatus = "underpaid";
+      if (cumulativeTotal < student.feeAmount) cumulativeStatus = "partial";
       else if (cumulativeTotal > student.feeAmount)
         cumulativeStatus = "overpaid";
       else cumulativeStatus = "valid";
@@ -445,42 +435,10 @@ async function syncPaymentsForSchool(school) {
           ? parseFloat((cumulativeTotal - student.feeAmount).toFixed(7))
           : 0;
 
-      const feeValidation = validatePaymentAgainstFee(
-        paymentAmount,
-        intent.amount,
-      );
-
-      if (feeValidation.status === "underpaid") {
-        logger.warn("Underpaid transaction skipped", {
-          txHash: tx.hash,
-          schoolId,
-          studentId: intent.studentId,
-          paid: paymentAmount,
-          required: intent.amount,
-        });
-        await savePayment({
-          schoolId,
-          studentId: intent.studentId,
-          txHash: tx.hash,
-          amount: paymentAmount,
-          feeAmount: intent.amount,
-          feeCategory: intent.feeCategory || null,
-          feeValidationStatus: "underpaid",
-          excessAmount: 0,
-          status: "FAILED",
-          memo,
-          senderAddress,
-          isSuspicious: true,
-          suspicionReason: feeValidation.message,
-          ledger: txLedger,
-          confirmationStatus: "failed",
-          confirmedAt: txDate,
-        });
-        summary.failed++;
-        summary.failedDetails.push({ txHash: tx.hash, reason: feeValidation.message });
-        newPayments++;
-        continue;
-      }
+      // In the sync path, partial payments are accepted — the cumulative status
+      // (partial / valid / overpaid) is what gets recorded. Per-transaction
+      // underpaid rejection is intentionally skipped here; the verifyPayment
+      // endpoint still rejects underpaid single-payment verifications.
 
       await savePayment({
         schoolId,
@@ -516,6 +474,7 @@ async function syncPaymentsForSchool(school) {
         // Update student record
         const updateData = {
           totalPaid: cumulativeTotal,
+          remainingBalance: parseFloat(Math.max(0, student.feeAmount - cumulativeTotal).toFixed(7)),
           feePaid: cumulativeTotal >= student.feeAmount,
         };
 

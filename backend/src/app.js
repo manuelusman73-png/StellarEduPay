@@ -171,32 +171,36 @@ const server = require.main === module
 async function shutdown(signal) {
   logger.info(`Received ${signal} signal — starting graceful shutdown`);
 
+  const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 10_000;
+
+  // Stop background services — no new work accepted
   stopPolling();
   retrySelector.stop();
   stopTxQueueWorker();
   stopReminderScheduler();
   stopSessionCleanupScheduler();
 
-  const deadline = Date.now() + 8_000;
-  while (retrySelector.isRunning() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  // Force exit after SHUTDOWN_TIMEOUT_MS regardless of in-flight requests
+  const forceExitTimer = setTimeout(() => {
+    logger.error(`Forced exit after ${SHUTDOWN_TIMEOUT_MS}ms shutdown timeout`);
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExitTimer.unref(); // don't keep the event loop alive just for this timer
 
+  // (1) Stop accepting new connections; (2) wait for in-flight requests to finish;
+  // (3) only then close the database connection.
   server.close(async () => {
     try {
       await mongoose.disconnect();
       logger.info('MongoDB disconnected — clean exit');
+      clearTimeout(forceExitTimer);
       process.exit(0);
     } catch (err) {
       logger.error('Error closing MongoDB', { error: err.message });
+      clearTimeout(forceExitTimer);
       process.exit(1);
     }
   });
-
-  setTimeout(() => {
-    logger.error('Forced exit after timeout');
-    process.exit(1);
-  }, 10_000);
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

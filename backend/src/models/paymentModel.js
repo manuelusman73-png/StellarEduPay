@@ -12,7 +12,7 @@ const paymentSchema = new mongoose.Schema(
     amount: { type: Number, required: true },
     feeAmount: { type: Number, default: null },
     feeCategory: { type: String, default: null, index: true },
-    feeValidationStatus: { type: String, enum: ['valid', 'underpaid', 'overpaid', 'unknown'], default: 'unknown' },
+    feeValidationStatus: { type: String, enum: ['valid', 'underpaid', 'overpaid', 'partial', 'unknown'], default: 'unknown' },
     excessAmount: { type: Number, default: 0 },
 
     assetCode: { type: String, default: null },

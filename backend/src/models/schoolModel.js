@@ -37,6 +37,13 @@ const schoolSchema = new mongoose.Schema(
      * e.g. "USD" for US schools, "PGK" for Papua New Guinea, "NGN" for Nigeria.
      */
     localCurrency:  { type: String, default: 'USD', uppercase: true, trim: true },
+    /**
+     * Per-school HMAC secret used to sign outbound webhook deliveries.
+     * Recipients verify the X-StellarEduPay-Signature header to confirm
+     * the payload originated from this server and was not tampered with.
+     * Generate with: crypto.randomBytes(32).toString('hex')
+     */
+    webhookSecret:  { type: String, default: null },
   },
   { timestamps: true }
 );

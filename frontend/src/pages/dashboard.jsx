@@ -50,7 +50,7 @@ export default function Dashboard() {
     setStudentsError(null);
     getStudents(p, PAGE_SIZE)
       .then(({ data }) => {
-        setStudents(data.students || data);
+        setStudents(data.students);
         setPages(data.pages || 1);
       })
       .catch(() => setStudentsError("Could not load student list."))
