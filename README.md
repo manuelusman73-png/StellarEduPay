@@ -229,9 +229,25 @@ Before you begin, ensure you have the following installed:
 
 - **Node.js** 18 or higher ([Download](https://nodejs.org/))
 - **npm** 9 or higher (bundled with Node.js)
-- **MongoDB** 4.4 or higher ([Download](https://www.mongodb.com/try/download/community) or use [MongoDB Atlas](https://www.mongodb.com/atlas))
+- **MongoDB** 6.0 or higher, running as a **replica set** ([Download](https://www.mongodb.com/try/download/community) or use [MongoDB Atlas](https://www.mongodb.com/atlas))
 - **Git** ([Download](https://git-scm.com/downloads))
 - **Docker + Docker Compose v2** (optional, for containerized deployment) ([Download](https://www.docker.com/get-started))
+
+> ⚠️ **MongoDB Replica Set Required**
+>
+> StellarEduPay uses [MongoDB multi-document transactions](https://www.mongodb.com/docs/manual/core/transactions/) to atomically record a payment and update the student's fee status. MongoDB only supports multi-document transactions on replica sets (or sharded clusters). A standalone `mongod` instance will cause transaction operations to fail at runtime.
+>
+> **Local development** — start a single-node replica set instead of a plain `mongod`:
+> ```bash
+> mongod --replSet rs0 --dbpath /path/to/data
+> # In a separate terminal, initialise the replica set once:
+> mongosh --eval "rs.initiate()"
+> ```
+> Then use `MONGO_URI=mongodb://localhost:27017/stellaredupay?replicaSet=rs0` in your `.env`.
+>
+> **Docker Compose** — the provided `docker-compose.yml` already configures MongoDB as a single-node replica set; no extra steps are needed.
+>
+> **MongoDB Atlas** — all Atlas clusters (including the free M0 tier) run as replica sets by default.
 
 ### Installation
 
