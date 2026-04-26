@@ -19,6 +19,7 @@ const receiptsRoutes = require('./routes/receiptsRoutes');
 const feeAdjustmentRoutes = require('./routes/feeAdjustmentRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 
+const { registerPaymentSavedSubscribers } = require('./services/paymentSavedSubscribers');
 const { startPolling, stopPolling } = require('./services/transactionPollingService');
 const retrySelector = require('./services/retryServiceSelector');
 const { startConsistencyScheduler } = require('./services/consistencyScheduler');
@@ -146,6 +147,7 @@ connectWithRetry().then(async () => {
   startTxQueueWorker();
   startReminderScheduler();
   startSessionCleanupScheduler();
+  registerPaymentSavedSubscribers();
 
   // Only initialise BullMQ when Redis is configured
   if (retrySelector.useBullMQ()) {
