@@ -3,6 +3,7 @@
 const Payment = require("../models/paymentModel");
 const { generateReferenceCode } = require("../utils/generateReferenceCode");
 const logger = require("../utils/logger").child("TransactionService");
+const paymentEvents = require("../events/paymentEvents");
 
 /**
  * Persist a payment record, enforcing uniqueness on txHash.
@@ -24,7 +25,9 @@ async function savePayment(data) {
     data = { ...data, referenceCode: await generateReferenceCode() };
   }
   try {
-    return await Payment.create(data);
+    const payment = await Payment.create(data);
+    paymentEvents.emit("payment.saved", payment);
+    return payment;
   } catch (e) {
     if (e.code === 11000) {
       const err = new Error(
