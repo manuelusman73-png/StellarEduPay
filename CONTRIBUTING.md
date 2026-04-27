@@ -298,16 +298,69 @@ const calc = (sid, fid) => {
 
 ### Running Tests
 
+#### 1. Install root dependencies (first time only)
+
 ```bash
-# Run all tests (from project root)
+# From the project root
+npm install
+```
+
+#### 2. Run the full test suite
+
+```bash
+# From the project root
 npm test
+```
 
-# Run specific test file
+All tests mock both the Stellar SDK and MongoDB — **no real network connection or running database is required**.
+
+Expected output:
+
+```
+PASS tests/stellar.test.js
+PASS tests/payment.test.js
+PASS tests/payment-limits.test.js
+...
+
+Test Suites: X passed, X total
+Tests:       X passed, X total
+Time:        ~5s
+```
+
+#### 3. Run a single test file
+
+```bash
+npm test -- tests/stellar.test.js
 npm test -- tests/payment.test.js
+npm test -- tests/payment-limits.test.js
+```
 
-# Run with coverage
+#### 4. Check code coverage
+
+```bash
 npm test -- --coverage
 ```
+
+Jest will print a per-file coverage table and write a full HTML report to `coverage/lcov-report/index.html`.
+
+#### Test files and what they cover
+
+| File | Coverage |
+|------|----------|
+| [`tests/stellar.test.js`](tests/stellar.test.js) | Stellar service: asset detection, fee validation, amount normalisation, transaction verification, ledger sync |
+| [`tests/payment.test.js`](tests/payment.test.js) | Payment API: full payment flow, all endpoints, edge cases, error handling |
+| [`tests/payment-limits.test.js`](tests/payment-limits.test.js) | Payment limits: validation, boundary cases, error codes |
+
+#### Environment variables for tests
+
+Tests use mocks and do **not** require a real `.env` file. If you want to run the backend's own test suite separately:
+
+```bash
+cd backend
+npm test
+```
+
+The backend tests also use mocks; no live MongoDB or Stellar Horizon connection is needed.
 
 ### Test Coverage Requirements
 

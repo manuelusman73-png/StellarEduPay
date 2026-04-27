@@ -20,6 +20,16 @@ const strictLimiter = rateLimit({
   message: { error: 'Too many requests to this endpoint, please try again later.', code: 'RATE_LIMIT_EXCEEDED' },
 });
 
+// Verify limiter — dedicated limiter for POST /api/payments/verify
+// Defaults to 10 req/min; configurable via VERIFY_RATE_LIMIT env var.
+const verifyLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: parseInt(process.env.VERIFY_RATE_LIMIT || '10', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many verify requests, please try again later.', code: 'RATE_LIMIT_EXCEEDED' },
+});
+
 // Reminder trigger limiter — prevents spamming students with reminder emails
 const reminderTriggerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
@@ -29,4 +39,4 @@ const reminderTriggerLimiter = rateLimit({
   message: { error: 'Too many reminder trigger requests. Please wait before sending more reminders.', code: 'RATE_LIMIT_EXCEEDED' },
 });
 
-module.exports = { generalLimiter, strictLimiter, reminderTriggerLimiter };
+module.exports = { generalLimiter, strictLimiter, reminderTriggerLimiter, verifyLimiter };

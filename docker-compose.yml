@@ -10,8 +10,12 @@ services:
       - STELLAR_NETWORK=${STELLAR_NETWORK}
       - SCHOOL_WALLET_ADDRESS=${SCHOOL_WALLET_ADDRESS}
       - STELLAR_SECRET_KEY=${STELLAR_SECRET_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       mongo:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - frontend-backend
@@ -41,6 +45,19 @@ services:
       - frontend-backend
     mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
     cpus: ${FRONTEND_CPUS:-0.5}
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - backend-db
+    mem_limit: ${REDIS_MEM_LIMIT:-128m}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   mongo:
     image: mongo:7

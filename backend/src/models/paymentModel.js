@@ -2,6 +2,7 @@
 
 const mongoose = require('mongoose');
 const softDelete = require('../utils/softDelete');
+const memoEncryption = require('../utils/memoEncryption');
 
 const paymentSchema = new mongoose.Schema(
   {
@@ -82,18 +83,38 @@ paymentSchema.virtual('stellarExplorerUrl').get(function () {
   return this.explorerUrl;
 });
 
-paymentSchema.pre('save', async function (next) {
-  if (!this.isNew && this.isModified()) {
-    try {
-      const original = await mongoose.model('Payment').findById(this._id).lean();
-      if (original && (original.status === 'SUCCESS' || original.status === 'FAILED')) {
-        throw new Error('Payment audit trail is immutable once in SUCCESS or FAILED state');
-      }
-    } catch (err) {
-      return next(err);
+paymentSchema.pre('save', function (next) {
+  // Use in-memory Mongoose helpers instead of a DB query to avoid an N+1
+  // round-trip on every save. this.isNew is true for inserts; for existing
+  // documents Mongoose tracks the original field values so we can check the
+  // persisted status without any additional database call.
+  if (!this.isNew) {
+    // $__getValue returns the current (possibly modified) value.
+    // For the immutability check we need the *original* persisted status.
+    // Mongoose stores it in this.$__.savedState when the document was loaded.
+    const savedState = this.$__ && this.$__.savedState;
+    const originalStatus = savedState ? savedState.status : this.status;
+
+    if (originalStatus === 'SUCCESS' || originalStatus === 'FAILED') {
+      return next(new Error('Payment audit trail is immutable once in SUCCESS or FAILED state'));
     }
   }
+
+  // Encrypt memo field at rest using application-level AES-256-GCM encryption.
+  // Encryption is a no-op when MEMO_ENCRYPTION_KEY is not set (graceful degradation).
+  if (this.isModified('memo') && this.memo != null) {
+    this.memo = memoEncryption.encryptMemo(this.memo);
+  }
+
   next();
+});
+
+// Decrypt memo transparently after loading from the database.
+// This runs for find(), findOne(), findById(), etc.
+paymentSchema.post('init', function () {
+  if (this.memo != null) {
+    this.memo = memoEncryption.decryptMemo(this.memo);
+  }
 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

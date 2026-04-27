@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { generateStellarPaymentUri } from "../utils/stellarUri";
 import { getStudent, getPaymentInstructions, getStudentPayments } from "../services/api";
+import DisputeForm from "./DisputeForm";
 
 const STATUS_STYLE = {
   valid:     { color: "#166534", bg: "#dcfce7" },
@@ -19,6 +20,8 @@ export default function PaymentForm() {
   const [error, setError]             = useState("");
   const [loading, setLoading]         = useState(false);
   const [copied, setCopied]           = useState(null);
+  const [disputingTx, setDisputingTx] = useState(null); // txHash currently being disputed
+  const [disputedTxs, setDisputedTxs] = useState(new Set()); // txHashes with open disputes
   const errorRef = useRef(null);
   const debounceRef = useRef(null);
 
@@ -205,6 +208,8 @@ export default function PaymentForm() {
             ) : payments.map((p, i) => {
               const st = p.feeValidationStatus || "unknown";
               const badge = STATUS_STYLE[st] || STATUS_STYLE.unknown;
+              const canDispute = st === "valid" || st === "overpaid";
+              const alreadyDisputed = disputedTxs.has(p.txHash);
               return (
                 <div key={p.txHash || i} className="pf-hist-item">
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
@@ -213,6 +218,35 @@ export default function PaymentForm() {
                   </div>
                   <div style={{ color: "var(--muted)", fontSize: "0.8rem", fontFamily: "monospace" }}>{p.txHash}</div>
                   {p.confirmedAt && <div style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "0.25rem" }}>{new Date(p.confirmedAt).toLocaleString()}</div>}
+
+                  {canDispute && (
+                    alreadyDisputed ? (
+                      <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#854d0e", background: "#fef9c3", padding: "0.25rem 0.6rem", borderRadius: 4, display: "inline-block" }}>
+                        Dispute submitted
+                      </div>
+                    ) : (
+                      disputingTx === p.txHash ? (
+                        <div style={{ marginTop: "0.75rem" }}>
+                          <DisputeForm
+                            txHash={p.txHash}
+                            studentId={studentId}
+                            onSuccess={(dispute) => {
+                              setDisputedTxs((prev) => new Set([...prev, p.txHash]));
+                              setDisputingTx(null);
+                            }}
+                            onCancel={() => setDisputingTx(null)}
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setDisputingTx(p.txHash)}
+                          style={{ marginTop: "0.5rem", padding: "0.25rem 0.75rem", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg)", color: "var(--text)", cursor: "pointer", fontSize: "0.75rem" }}
+                        >
+                          Raise Dispute
+                        </button>
+                      )
+                    )
+                  )}
                 </div>
               );
             })}

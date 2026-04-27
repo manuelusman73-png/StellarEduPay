@@ -120,6 +120,20 @@ if (!JWT_SECRET) {
 }
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "8h";
 
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[Config] JWT_SECRET is required in production. ' +
+      'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"'
+    );
+  } else {
+    console.warn(
+      '[Config] WARNING: JWT_SECRET is not set. Admin authentication is non-functional. ' +
+      'Set JWT_SECRET in your .env file before deploying to production.'
+    );
+  }
+}
+
 // ── Fee Reminders ─────────────────────────────────────────────────────────────
 // How often the scheduler checks for unpaid fees (default: 24 hours)
 const REMINDER_INTERVAL_MS = parseInt(

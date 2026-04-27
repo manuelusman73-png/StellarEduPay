@@ -302,13 +302,25 @@ async function getPaymentSummary(req, res, next) {
 
 // ── Helpers for bulk import ──────────────────────────────────────────────────
 
+const CSV_MAX_SIZE_BYTES = parseInt(process.env.CSV_MAX_SIZE_BYTES, 10) || 5 * 1024 * 1024; // 5 MB
+const CSV_MAX_ROWS = parseInt(process.env.CSV_MAX_ROWS, 10) || 10000;
+
 function parseCsvBuffer(buffer) {
   return new Promise((resolve, reject) => {
     const rows = [];
     const stream = Readable.from(buffer);
     stream
       .pipe(csv())
-      .on('data', (row) => rows.push(row))
+      .on('data', (row) => {
+        if (rows.length >= CSV_MAX_ROWS) {
+          stream.destroy();
+          const err = new Error(`CSV exceeds maximum row limit of ${CSV_MAX_ROWS}`);
+          err.code = 'CSV_TOO_MANY_ROWS';
+          err.status = 400;
+          return reject(err);
+        }
+        rows.push(row);
+      })
       .on('end', () => resolve(rows))
       .on('error', (err) => reject(err));
   });
@@ -354,6 +366,12 @@ async function bulkImportStudents(req, res, next) {
     let rows;
 
     if (req.file) {
+      if (req.file.size > CSV_MAX_SIZE_BYTES) {
+        return res.status(413).json({
+          error: `CSV file exceeds maximum allowed size of ${CSV_MAX_SIZE_BYTES} bytes`,
+          code: 'CSV_TOO_LARGE',
+        });
+      }
       rows = await parseCsvBuffer(req.file.buffer);
     } else if (req.body && Array.isArray(req.body.students)) {
       rows = req.body.students;
@@ -437,6 +455,9 @@ async function bulkImportStudents(req, res, next) {
 
     res.status(results.failed === results.total ? 400 : 201).json(results);
   } catch (err) {
+    if (err.code === 'CSV_TOO_MANY_ROWS') {
+      return res.status(400).json({ error: err.message, code: err.code });
+    }
     next(err);
   }
 }

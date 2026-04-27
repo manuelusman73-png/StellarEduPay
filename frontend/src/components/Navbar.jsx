@@ -15,6 +15,7 @@ const PUBLIC_LINKS = [
 const ADMIN_LINKS = [
   { href: "/fee-adjustments", label: "Fee Rules" },
   { href: "/audit-logs", label: "Audit Logs" },
+  { href: "/disputes", label: "Disputes" },
 ];
 
 export default function Navbar() {
@@ -23,7 +24,7 @@ export default function Navbar() {
   const { dark, toggle } = useTheme();
   const { isAdmin, logout } = useAdminAuth();
 
-  const LINKS = isAdmin ? [...PUBLIC_LINKS, ...ADMIN_LINKS] : PUBLIC_LINKS;
+  const allLinks = isAdmin ? [...PUBLIC_LINKS, ...ADMIN_LINKS] : PUBLIC_LINKS;
 
   // Close the mobile menu on every route change, including browser back/forward.
   useEffect(() => { setOpen(false); }, [pathname]);
@@ -62,7 +63,7 @@ export default function Navbar() {
 
         {/* Desktop links */}
         <div className="nav-links" style={{ display: "flex", gap: "1.75rem" }}>
-          {LINKS.map(({ href, label }) => (
+          {allLinks.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
@@ -155,7 +156,7 @@ export default function Navbar() {
 
       {/* Mobile dropdown */}
       <div className={`nav-mobile${open ? " open" : ""}`}>
-        {LINKS.map(({ href, label }) => (
+        {allLinks.map(({ href, label }) => (
           <Link
             key={href}
             href={href}
