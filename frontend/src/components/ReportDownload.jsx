@@ -28,7 +28,18 @@ export default function ReportDownload() {
     const params = {};
     if (startDate) params.startDate = startDate;
     if (endDate)   params.endDate   = endDate;
-    window.open(getReportCsvUrl(params), "_blank");
+    // Use an anchor element to trigger the download directly, avoiding popup
+    // blockers that may suppress programmatic tab-open calls after async ops.
+    const filename = startDate && endDate
+      ? `report-${startDate}-to-${endDate}.csv`
+      : 'report-all-time.csv';
+    const a = document.createElement('a');
+    a.href = getReportCsvUrl(params);
+    a.download = filename;
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   const COLS = ["Date", "Amount", "Payments", "Valid", "Overpaid", "Underpaid", "Students"];

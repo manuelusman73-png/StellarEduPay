@@ -33,12 +33,18 @@ async function runHandleGenerate(startDate, endDate, mockGetReport) {
   }
 }
 
-/** Mirrors handleCsv from ReportDownload.jsx */
-function buildCsvUrl(startDate, endDate) {
+/**
+ * Mirrors handleCsv from ReportDownload.jsx — returns the anchor attrs
+ * that would be set on the programmatic <a> element.
+ */
+function buildCsvDownload(startDate, endDate) {
   const params = {};
   if (startDate) params.startDate = startDate;
   if (endDate)   params.endDate   = endDate;
-  return getReportCsvUrl(params);
+  const filename = startDate && endDate
+    ? `report-${startDate}-to-${endDate}.csv`
+    : 'report-all-time.csv';
+  return { href: getReportCsvUrl(params), filename };
 }
 
 // ── Sample report fixture ─────────────────────────────────────────────────────
@@ -136,22 +142,27 @@ describe('handleGenerate logic', () => {
   });
 });
 
-describe('handleCsv URL builder', () => {
-  test('builds correct CSV URL with both dates', () => {
-    const url = buildCsvUrl('2026-01-01', '2026-01-31');
-    expect(url).toBe(`${BASE_URL}/reports?startDate=2026-01-01&endDate=2026-01-31&format=csv`);
+describe('handleCsv anchor download (#449)', () => {
+  test('builds correct href and filename with both dates', () => {
+    const { href, filename } = buildCsvDownload('2026-01-01', '2026-01-31');
+    expect(href).toBe(`${BASE_URL}/reports?startDate=2026-01-01&endDate=2026-01-31&format=csv`);
+    expect(filename).toBe('report-2026-01-01-to-2026-01-31.csv');
   });
 
-  test('builds CSV URL with only startDate', () => {
-    const url = buildCsvUrl('2026-01-01', '');
-    expect(url).toContain('startDate=2026-01-01');
-    expect(url).not.toContain('endDate');
-    expect(url).toContain('format=csv');
+  test('uses report-all-time.csv when no dates provided', () => {
+    const { href, filename } = buildCsvDownload('', '');
+    expect(href).toContain('format=csv');
+    expect(filename).toBe('report-all-time.csv');
   });
 
-  test('builds CSV URL with no dates', () => {
-    const url = buildCsvUrl('', '');
-    expect(url).toBe(`${BASE_URL}/reports?format=csv`);
+  test('uses report-all-time.csv when only startDate provided', () => {
+    const { filename } = buildCsvDownload('2026-01-01', '');
+    expect(filename).toBe('report-all-time.csv');
+  });
+
+  test('uses report-all-time.csv when only endDate provided', () => {
+    const { filename } = buildCsvDownload('', '2026-01-31');
+    expect(filename).toBe('report-all-time.csv');
   });
 });
 
@@ -215,6 +226,18 @@ describe('ReportDownload component source – acceptance criteria', () => {
   test('has CSV download button calling getReportCsvUrl', () => {
     expect(src).toMatch(/getReportCsvUrl/);
     expect(src).toMatch(/Download CSV/);
+  });
+
+  test('uses anchor element for download, not window.open', () => {
+    expect(src).not.toMatch(/window\.open/);
+    expect(src).toMatch(/createElement\(['"]a['"]\)/);
+    expect(src).toMatch(/\.download\s*=/);
+    expect(src).toMatch(/\.click\(\)/);
+  });
+
+  test('download filename includes date range when both dates set', () => {
+    expect(src).toMatch(/report-\$\{startDate\}-to-\$\{endDate\}\.csv/);
+    expect(src).toMatch(/report-all-time\.csv/);
   });
 
   test('imports getReport and getReportCsvUrl from api service', () => {
