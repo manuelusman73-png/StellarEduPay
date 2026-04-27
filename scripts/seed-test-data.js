@@ -6,30 +6,22 @@
  * for local development and testing.
  *
  * Usage:
- *   node scripts/seed-test-data.js
+ *   node scripts/seed-test-data.js           # upsert (safe default)
+ *   node scripts/seed-test-data.js --clean   # drop collections then re-seed
  *
  * Requirements:
  *   - backend/.env must exist with MONGO_URI and SCHOOL_WALLET_ADDRESS set
  *   - MongoDB must be running
  *
- * Safe to re-run: existing records are skipped (upsert / insertIfAbsent).
+ * Safe to re-run: all inserts use upsert so repeated runs produce identical records.
  */
 
 require('dotenv').config({ path: require('path').resolve(__dirname, '../backend/.env') });
 
-// Validate env before touching mongoose
-const MONGO_URI = process.env.MONGO_URI;
-const SCHOOL_WALLET_ADDRESS = process.env.SCHOOL_WALLET_ADDRESS || 'PLACEHOLDER';
+// Patch env so config/index.js validation passes when models are loaded
+process.env.SCHOOL_WALLET_ADDRESS = process.env.SCHOOL_WALLET_ADDRESS || 'PLACEHOLDER';
 
-if (!MONGO_URI) {
-  console.error('❌  MONGO_URI is not set. Check backend/.env');
-  process.exit(1);
-}
-
-// Patch env so config/index.js validation passes
-process.env.SCHOOL_WALLET_ADDRESS = SCHOOL_WALLET_ADDRESS;
-
-const mongoose = require('../backend/node_modules/mongoose');
+const mongoose = require('mongoose');
 const FeeStructure = require('../backend/src/models/feeStructureModel');
 const Student = require('../backend/src/models/studentModel');
 
@@ -81,60 +73,71 @@ async function seedFeeStructures() {
 }
 
 /**
- * Insert students that don't already exist (skip duplicates by studentId).
+ * Upsert students by studentId — consistent with the fee structure approach.
  * Resolves feeAmount from the fee map so the seed is self-contained.
  */
 async function seedStudents(feeMap) {
   console.log('\n🎓  Seeding students…');
-  let created = 0;
-  let skipped = 0;
 
   for (const s of STUDENTS) {
-    const exists = await Student.exists({ studentId: s.studentId });
-    if (exists) {
-      console.log(`   ⏭   ${s.studentId} (${s.name}) — already exists, skipped`);
-      skipped++;
-      continue;
-    }
-
     const feeAmount = feeMap[s.class];
     if (!feeAmount) {
       console.warn(`   ⚠️   No fee structure found for class "${s.class}" — skipping ${s.studentId}`);
-      skipped++;
       continue;
     }
 
-    await Student.create({ feeAmount, ...s });
+    await Student.findOneAndUpdate(
+      { studentId: s.studentId },
+      { feeAmount, ...s },
+      { upsert: true, new: true, runValidators: true }
+    );
     console.log(`   ✔  ${s.studentId} — ${s.name} (${s.class}, $${feeAmount} USDC)`);
-    created++;
   }
-
-  return { created, skipped };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const clean = process.argv.includes('--clean');
+  const MONGO_URI = process.env.MONGO_URI;
+
   console.log('🌱  StellarEduPay — test data seed');
   console.log(`    MongoDB: ${MONGO_URI}`);
+  if (clean) console.log('    Mode: --clean (dropping collections before re-seeding)');
 
   await mongoose.connect(MONGO_URI);
   console.log('    Connected to MongoDB');
 
+  if (clean) {
+    await FeeStructure.deleteMany({});
+    await Student.deleteMany({});
+    console.log('    Collections dropped.');
+  }
+
   const feeMap = await seedFeeStructures();
-  const { created, skipped } = await seedStudents(feeMap);
+  await seedStudents(feeMap);
 
   console.log('\n✅  Done.');
-  console.log(`    Students created: ${created}  |  skipped: ${skipped}`);
   console.log('\n    Quick test commands:');
   console.log('      GET  http://localhost:5000/api/students');
   console.log('      GET  http://localhost:5000/api/fees');
   console.log('      GET  http://localhost:5000/api/students/STU001\n');
 }
 
-main()
-  .catch((err) => {
-    console.error('\n❌  Seed failed:', err.message);
+// Only validate env and run when executed directly (not when require()'d by tests)
+if (require.main === module) {
+  const MONGO_URI = process.env.MONGO_URI;
+  if (!MONGO_URI) {
+    console.error('❌  MONGO_URI is not set. Check backend/.env');
     process.exit(1);
-  })
-  .finally(() => mongoose.disconnect());
+  }
+
+  main()
+    .catch((err) => {
+      console.error('\n❌  Seed failed:', err.message);
+      process.exit(1);
+    })
+    .finally(() => mongoose.disconnect());
+}
+
+module.exports = { seedFeeStructures, seedStudents, FEE_STRUCTURES, STUDENTS };

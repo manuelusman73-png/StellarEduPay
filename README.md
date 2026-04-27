@@ -2,6 +2,7 @@
 
 A decentralized school fee payment system built on the Stellar blockchain network. StellarEduPay enables transparent, immutable, and verifiable school fee payments — eliminating manual reconciliation, reducing fraud, and providing instant proof of payment for both schools and parents.
 
+[![CI](https://github.com/manuelusman73-png/StellarEduPay/actions/workflows/ci.yml/badge.svg)](https://github.com/manuelusman73-png/StellarEduPay/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
@@ -542,7 +543,28 @@ openssl rand -base64 32
 
 Once the application is running, seed some initial data:
 
-**1. Create a fee structure:**
+#### Using the Seed Script (Recommended)
+
+The seed script populates the database with sample fee structures and students for local development and testing.
+
+**Normal run (upsert — safe to re-run):**
+```bash
+node scripts/seed-test-data.js
+```
+Re-running this command is safe: all inserts use upsert, so no duplicate records are created.
+
+**Clean run (drop and recreate):**
+```bash
+node scripts/seed-test-data.js --clean
+```
+Use `--clean` when you want a completely fresh dataset — it drops all seeded collections before re-seeding. Useful after schema changes or when you want to reset to a known state.
+
+| Option | Behaviour | When to use |
+|--------|-----------|-------------|
+| _(none)_ | Upsert — creates or updates records | Day-to-day development, CI |
+| `--clean` | Drop collections then re-seed | Schema changes, full reset |
+
+#### Manual curl commands
 ```bash
 curl -X POST http://localhost:5000/api/fees \
   -H "Content-Type: application/json" \
@@ -1021,6 +1043,8 @@ We welcome contributions! Please read our [Contributing Guidelines](CONTRIBUTING
 - Development workflow
 - Pull request process
 - Coding standards
+
+> **CI requirement**: All pull requests must pass the CI workflow before merging. The CI runs the full test suite on every push and pull request targeting `main`.
 
 ### Quick Start for Contributors
 
