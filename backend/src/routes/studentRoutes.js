@@ -25,7 +25,7 @@ router.use(resolveSchool);
 
 // Admin-only routes
 router.post('/', requireAdminAuth, validateRegisterStudent, registerStudent);
-router.post('/bulk', requireAdminAuth, upload.single('file'), bulkImportStudents);
+router.post('/bulk', requireAdminAuth, express.json({ limit: '1mb' }), upload.single('file'), bulkImportStudents);
 router.get('/', requireAdminAuth, getAllStudents);
 
 // Public routes

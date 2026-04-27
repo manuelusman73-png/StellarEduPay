@@ -81,6 +81,10 @@ if (MAX_PAYMENT_AMOUNT <= MIN_PAYMENT_AMOUNT) {
   );
 }
 
+// ── Body Size Limit ───────────────────────────────────────────────────────────
+// Global JSON body size limit (default: 10kb). Bulk import uses 1mb regardless.
+const MAX_BODY_SIZE = process.env.MAX_BODY_SIZE || '10kb';
+
 // ── Timeouts ──────────────────────────────────────────────────────────────────
 const REQUEST_TIMEOUT_MS = parseInt(
   process.env.REQUEST_TIMEOUT_MS || "30000",
@@ -136,6 +140,7 @@ const config = Object.freeze({
   MIN_PAYMENT_AMOUNT,
   MAX_PAYMENT_AMOUNT,
   MAX_QUEUE_DEPTH,
+  MAX_BODY_SIZE,
   REQUEST_TIMEOUT_MS,
   STELLAR_TIMEOUT_MS,
   JWT_SECRET,

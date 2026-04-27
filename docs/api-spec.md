@@ -11,6 +11,7 @@ All error responses follow the [Error Responses](#error-responses) format.
 - [Authentication](#authentication)
 - [School Context](#school-context)
 - [Idempotency](#idempotency)
+- [Request Body Size Limits](#request-body-size-limits)
 - [Schools](#schools)
 - [Students](#students)
 - [Fee Structures](#fee-structures)
@@ -70,6 +71,26 @@ Missing the header on these routes returns:
 HTTP 400
 { "error": "Idempotency-Key header is required for this request", "code": "MISSING_IDEMPOTENCY_KEY" }
 ```
+
+---
+
+## Request Body Size Limits
+
+To protect against oversized payload attacks, the API enforces JSON body size limits:
+
+| Endpoint | Limit |
+|----------|-------|
+| All endpoints (default) | `10kb` (configurable via `MAX_BODY_SIZE` env var) |
+| `POST /api/students/bulk` | `1mb` |
+
+Requests that exceed the applicable limit are rejected before reaching any handler:
+
+```json
+HTTP 413
+{ "error": "request entity too large" }
+```
+
+The global limit can be tuned via the `MAX_BODY_SIZE` environment variable (e.g. `MAX_BODY_SIZE=50kb`). The bulk import override is fixed at `1mb` regardless of `MAX_BODY_SIZE`.
 
 ---
 

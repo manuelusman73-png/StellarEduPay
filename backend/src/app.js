@@ -61,7 +61,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
-app.use(express.json());
+app.use(express.json({ limit: config.MAX_BODY_SIZE }));
 app.use(requestLogger());
 
 const concurrentMiddleware = createConcurrentRequestMiddleware({
