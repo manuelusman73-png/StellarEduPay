@@ -18,6 +18,7 @@ const sourceValidationRuleRoutes = require('./routes/sourceValidationRuleRoutes'
 const receiptsRoutes = require('./routes/receiptsRoutes');
 const feeAdjustmentRoutes = require('./routes/feeAdjustmentRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const { registerPaymentSavedSubscribers } = require('./services/paymentSavedSubscribers');
 const { startPolling, stopPolling } = require('./services/transactionPollingService');
@@ -85,6 +86,7 @@ app.use('/api/source-rules', sourceValidationRuleRoutes);
 app.use('/api/receipts', receiptsRoutes);
 app.use('/api/fee-adjustments', feeAdjustmentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/auth', authRoutes);
 app.get('/api/consistency', runConsistencyCheck);
 app.get('/health', healthCheck);
 
