@@ -17,6 +17,12 @@ let isPolling = false;
 const POLLING_INTERVAL_MS = 30000; // Poll every 30 seconds
 const TRANSACTIONS_PER_POLL = 20;
 
+// Exponential backoff state — reset on first successful poll after errors.
+// POLL_MAX_BACKOFF_MS defaults to 5 minutes; configurable via env var.
+const POLL_MAX_BACKOFF_MS = parseInt(process.env.POLL_MAX_BACKOFF_MS || '300000', 10);
+let consecutiveErrors = 0;
+let currentIntervalMs = POLLING_INTERVAL_MS;
+
 /**
  * Process a single transaction for a school
  */
@@ -204,12 +210,14 @@ async function pollSchoolTransactions(school) {
       schoolId: school.schoolId,
       error: error.message,
     });
-    return { schoolId: school.schoolId, error: error.message };
+    return { schoolId: school.schoolId, error: error.message, horizonError: true };
   }
 }
 
 /**
- * Poll all active schools for new transactions
+ * Poll all active schools for new transactions.
+ * Applies exponential backoff when Horizon returns errors; resets to the
+ * normal interval on the first fully-successful cycle.
  */
 async function pollAllSchools() {
   if (!isPolling) return;
@@ -219,6 +227,7 @@ async function pollAllSchools() {
     
     if (schools.length === 0) {
       logger.debug('No active schools to poll');
+      scheduleNextPoll();
       return;
     }
 
@@ -232,18 +241,53 @@ async function pollAllSchools() {
       if (result.status === 'fulfilled') {
         acc.processed += result.value.processed || 0;
         acc.skipped += result.value.skipped || 0;
+        if (result.value.horizonError) acc.errors++;
       } else {
         acc.errors++;
       }
       return acc;
     }, { processed: 0, skipped: 0, errors: 0 });
 
+    if (summary.errors > 0) {
+      // At least one school hit a Horizon error — back off.
+      consecutiveErrors++;
+      const backoff = Math.min(POLLING_INTERVAL_MS * Math.pow(2, consecutiveErrors), POLL_MAX_BACKOFF_MS);
+      currentIntervalMs = backoff;
+      logger.info('Horizon errors detected; backing off polling interval', {
+        consecutiveErrors,
+        nextIntervalMs: currentIntervalMs,
+      });
+    } else {
+      // Successful cycle — reset backoff.
+      if (consecutiveErrors > 0) {
+        logger.info('Polling recovered; resetting interval to normal', {
+          intervalMs: POLLING_INTERVAL_MS,
+        });
+      }
+      consecutiveErrors = 0;
+      currentIntervalMs = POLLING_INTERVAL_MS;
+    }
+
     if (summary.processed > 0 || summary.errors > 0) {
       logger.info('Polling cycle completed', summary);
     }
   } catch (error) {
-    logger.error('Error in polling cycle', { error: error.message });
+    consecutiveErrors++;
+    const backoff = Math.min(POLLING_INTERVAL_MS * Math.pow(2, consecutiveErrors), POLL_MAX_BACKOFF_MS);
+    currentIntervalMs = backoff;
+    logger.error('Error in polling cycle', { error: error.message, nextIntervalMs: currentIntervalMs });
   }
+
+  scheduleNextPoll();
+}
+
+/**
+ * Schedule the next poll using the current (possibly backed-off) interval.
+ * Uses setTimeout so the interval can change dynamically between cycles.
+ */
+function scheduleNextPoll() {
+  if (!isPolling) return;
+  pollingInterval = setTimeout(pollAllSchools, currentIntervalMs);
 }
 
 /**
@@ -256,13 +300,12 @@ function startPolling() {
   }
 
   isPolling = true;
+  consecutiveErrors = 0;
+  currentIntervalMs = POLLING_INTERVAL_MS;
   logger.info('Starting transaction polling service', { intervalMs: POLLING_INTERVAL_MS });
 
-  // Run immediately on startup
+  // Run immediately on startup, then self-schedule via setTimeout for backoff support
   pollAllSchools();
-
-  // Then poll at regular intervals
-  pollingInterval = setInterval(pollAllSchools, POLLING_INTERVAL_MS);
 }
 
 /**
@@ -273,7 +316,7 @@ function stopPolling() {
 
   isPolling = false;
   if (pollingInterval) {
-    clearInterval(pollingInterval);
+    clearTimeout(pollingInterval);
     pollingInterval = null;
   }
   logger.info('Transaction polling service stopped');
@@ -285,4 +328,12 @@ module.exports = {
   pollAllSchools,
   pollSchoolTransactions,
   processTransaction,
+  // Exposed for testing
+  _getBackoffState: () => ({ consecutiveErrors, currentIntervalMs }),
+  _resetBackoffState: () => {
+    consecutiveErrors = 0;
+    currentIntervalMs = POLLING_INTERVAL_MS;
+    isPolling = true; // allow direct pollAllSchools() calls in tests
+    if (pollingInterval) { clearTimeout(pollingInterval); pollingInterval = null; }
+  },
 };
