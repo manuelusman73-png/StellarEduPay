@@ -186,9 +186,26 @@ export default function Dashboard() {
               <button onClick={() => fetchStudents(page)} style={{ marginLeft: "1rem", padding: "0.25rem 0.75rem", borderRadius: 6, border: "1px solid #fecaca", background: "transparent", color: "#991b1b", cursor: "pointer", fontSize: "0.8rem" }}>Retry</button>
             </div>
           ) : (
-            <div className="table-wrap">
+            <div className="table-wrap" aria-busy={studentsLoading}>
               {studentsLoading ? (
-                <div style={{ padding: "2rem", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>Loading…</div>
+                <table className="dash-table" aria-label="Loading students">
+                  <thead>
+                    <tr>
+                      <th>Student ID</th><th>Name</th><th>Class</th><th>Fee</th><th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <tr key={i}>
+                        <td><div className="skeleton" style={{ width: "70px" }} /></td>
+                        <td><div className="skeleton" style={{ width: "120px" }} /></td>
+                        <td><div className="skeleton" style={{ width: "80px" }} /></td>
+                        <td><div className="skeleton" style={{ width: "60px" }} /></td>
+                        <td><div className="skeleton" style={{ width: "55px" }} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               ) : (
                 <table className="dash-table">
                   <thead>

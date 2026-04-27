@@ -8,7 +8,8 @@ const paymentSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     studentId: { type: String, required: true, index: true },
 
-    txHash: { type: String, required: true, unique: true, index: true },
+    // unique: false here — uniqueness is enforced by the compound index { schoolId, txHash } below
+    txHash: { type: String, required: true, index: true },
     amount: { type: Number, required: true },
     feeAmount: { type: Number, default: null },
     feeCategory: { type: String, default: null, index: true },
@@ -55,8 +56,9 @@ const paymentSchema = new mongoose.Schema(
 softDelete(paymentSchema);
 
 // Indexes
-// Note: txHash single-field index is declared inline (unique: true, index: true) above.
-// The compound below covers payment-history queries: filter by school+student, sort by date desc.
+// Compound unique index enforces per-school txHash uniqueness (same tx can exist in two schools).
+// The single-field txHash index (inline, non-unique) is kept for cross-school lookups.
+paymentSchema.index({ schoolId: 1, txHash: 1 }, { unique: true });
 paymentSchema.index({ studentId: 1, confirmedAt: -1 });
 paymentSchema.index({ schoolId: 1, confirmedAt: -1 });
 paymentSchema.index({ schoolId: 1, studentId: 1, confirmedAt: -1 });

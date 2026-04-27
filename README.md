@@ -26,6 +26,7 @@ A decentralized school fee payment system built on the Stellar blockchain networ
 - [Testing](#-testing)
 - [Project Structure](#-project-structure)
 - [Documentation](#-documentation)
+- [Monitoring & Observability](#-monitoring--observability)
 - [Contributing](#-contributing)
 - [License](#-license)
 
@@ -1034,6 +1035,77 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 | [`docs/api-spec.md`](docs/api-spec.md) | Complete API reference with request/response examples |
 | [`docs/stellar-integration.md`](docs/stellar-integration.md) | Stellar-specific details: memo field, assets, testnet setup |
 | [`docs/payment-limits.md`](docs/payment-limits.md) | Payment limits feature: configuration, security, troubleshooting |
+
+---
+
+## 📊 Monitoring & Observability
+
+### Log Format
+
+The backend emits **JSON-structured logs** to stdout. Each log line is a single JSON object:
+
+```json
+{
+  "level": "info",
+  "msg": "Payment synced",
+  "schoolId": "SCH-DEFAULT",
+  "txHash": "abc123...",
+  "studentId": "STU001",
+  "amount": 250,
+  "ts": "2026-03-24T10:00:00.000Z"
+}
+```
+
+Aggregate logs with any standard tool (CloudWatch Logs, Datadog, Loki, ELK). Filter by `level: "error"` for alerting.
+
+### Health Check Endpoint
+
+```
+GET /health
+```
+
+| Response | Meaning |
+|----------|---------|
+| `200 { "status": "ok" }` | All systems healthy — MongoDB connected, background workers running |
+| `200 { "status": "degraded", "details": {...} }` | App is up but a subsystem (e.g. Stellar Horizon) is unreachable; payments may be delayed |
+| `503 { "status": "unhealthy" }` | MongoDB disconnected or a critical worker has crashed; the app cannot process payments |
+
+Use the health endpoint as the target for load-balancer health checks and uptime monitors (e.g. UptimeRobot, AWS Route 53 health checks).
+
+### Key Metrics to Monitor
+
+| Metric | Description | How to Observe |
+|--------|-------------|----------------|
+| **Sync lag** | Time since the last successful blockchain sync | Log field `lastSyncAt`; alert if `now - lastSyncAt > 5 min` |
+| **Retry queue depth** | Number of payments awaiting re-verification | Query `db.pendingverifications.countDocuments()` or expose via `/api/payments/retry-queue` |
+| **Payment processing time** | Latency from transaction confirmed on Stellar to status updated in DB | Log field `processingMs` on each sync event |
+| **Error rate** | Count of `level: "error"` log lines per minute | Log aggregation filter |
+| **Underpaid / suspicious payments** | Payments flagged `feeValidationStatus: "underpaid"` or `isSuspicious: true` | MongoDB query or log filter |
+
+### Recommended Alerting Thresholds
+
+| Alert | Threshold | Severity |
+|-------|-----------|----------|
+| Sync lag | `lastSyncAt` older than **5 minutes** | Warning |
+| Sync lag | `lastSyncAt` older than **15 minutes** | Critical |
+| Retry queue depth | > **50** pending verifications | Warning |
+| Retry queue depth | > **200** pending verifications | Critical |
+| Payment processing time (p95) | > **10 seconds** | Warning |
+| Health check | Returns `503` for **2 consecutive checks** | Critical |
+| Error log rate | > **10 errors/minute** | Warning |
+
+### Docker Compose Logs
+
+```bash
+# Stream all service logs
+docker compose logs -f
+
+# Backend only
+docker compose logs -f backend
+
+# Filter for errors
+docker compose logs backend | grep '"level":"error"'
+```
 
 ---
 

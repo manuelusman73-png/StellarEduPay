@@ -15,6 +15,7 @@ export default function PaymentForm() {
   const [student, setStudent]         = useState(null);
   const [instructions, setInstructions] = useState(null);
   const [payments, setPayments]       = useState(null);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [error, setError]             = useState("");
   const [loading, setLoading]         = useState(false);
   const [copied, setCopied]           = useState(null);
@@ -37,6 +38,7 @@ export default function PaymentForm() {
     if (!id.trim()) return;
     setError(""); setStudent(null); setInstructions(null); setPayments(null);
     setLoading(true);
+    setPaymentsLoading(true);
     try {
       const [stuRes, instrRes, payRes] = await Promise.all([
         getStudent(id),
@@ -51,6 +53,7 @@ export default function PaymentForm() {
       errorRef.current?.focus();
     } finally {
       setLoading(false);
+      setPaymentsLoading(false);
     }
   }, []);
 
@@ -78,6 +81,8 @@ export default function PaymentForm() {
         .pf-row:last-child { border-bottom: none; }
         .pf-row-label { color: var(--muted); }
         .pf-hist-item { border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; font-size: 0.875rem; }
+        .pf-skeleton { height: 1rem; background: var(--border); border-radius: 4px; animation: pf-pulse 1.5s infinite; }
+        @keyframes pf-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
       `}</style>
 
       <div className="pf-wrap">
@@ -182,10 +187,20 @@ export default function PaymentForm() {
           </div>
         )}
 
-        {payments !== null && (
-          <div style={{ marginTop: "2rem" }}>
+        {(payments !== null || paymentsLoading) && (
+          <div style={{ marginTop: "2rem" }} aria-busy={paymentsLoading}>
             <h3 style={{ marginBottom: "1rem", fontSize: "1rem" }}>Payment History</h3>
-            {payments.length === 0 ? (
+            {paymentsLoading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="pf-hist-item">
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+                    <div className="pf-skeleton" style={{ width: "80px" }} />
+                    <div className="pf-skeleton" style={{ width: "55px" }} />
+                  </div>
+                  <div className="pf-skeleton" style={{ width: "100%" }} />
+                </div>
+              ))
+            ) : payments.length === 0 ? (
               <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>No payments recorded yet.</p>
             ) : payments.map((p, i) => {
               const st = p.feeValidationStatus || "unknown";

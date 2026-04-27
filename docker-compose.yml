@@ -13,6 +13,9 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    networks:
+      - frontend-backend
+      - backend-db
     mem_limit: ${BACKEND_MEM_LIMIT:-512m}
     cpus: ${BACKEND_CPUS:-1.0}
     healthcheck:
@@ -34,6 +37,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - frontend-backend
     mem_limit: ${FRONTEND_MEM_LIMIT:-256m}
     cpus: ${FRONTEND_CPUS:-0.5}
 
@@ -46,6 +51,8 @@ services:
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password}
     volumes:
       - mongo_data:/data/db
+    networks:
+      - backend-db
     mem_limit: ${MONGO_MEM_LIMIT:-1g}
     cpus: ${MONGO_CPUS:-1.0}
     healthcheck:
@@ -81,7 +88,15 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    networks:
+      - backend-db
     restart: unless-stopped
 
 volumes:
   mongo_data:
+
+networks:
+  frontend-backend:
+    driver: bridge
+  backend-db:
+    driver: bridge
