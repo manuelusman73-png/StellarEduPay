@@ -3,17 +3,18 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import TestnetBanner from './TestnetBanner';
 import { useTheme } from '../pages/_app';
+import { useAdminAuth } from '../hooks/useAdminAuth';
 
-const LINKS = [
+const PUBLIC_LINKS = [
   { href: "/", label: "Home" },
   { href: "/pay-fees", label: "Pay Fees" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/reports", label: "Reports" },
-  { href: "/fee-adjustments", label: "Fee Rules" },
 ];
 
-// Admin-only links — shown only when a JWT token is present in localStorage.
 const ADMIN_LINKS = [
+  { href: "/fee-adjustments", label: "Fee Rules" },
+  { href: "/audit-logs", label: "Audit Logs" },
   { href: "/disputes", label: "Disputes" },
 ];
 
@@ -21,22 +22,12 @@ export default function Navbar() {
   const { pathname } = useRouter();
   const [open, setOpen] = useState(false);
   const { dark, toggle } = useTheme();
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { isAdmin, logout } = useAdminAuth();
+
+  const allLinks = isAdmin ? [...PUBLIC_LINKS, ...ADMIN_LINKS] : PUBLIC_LINKS;
 
   // Close the mobile menu on every route change, including browser back/forward.
   useEffect(() => { setOpen(false); }, [pathname]);
-
-  // Detect admin JWT presence on mount and on storage changes.
-  useEffect(() => {
-    function checkAdmin() {
-      setIsAdmin(typeof window !== 'undefined' && !!localStorage.getItem('token'));
-    }
-    checkAdmin();
-    window.addEventListener('storage', checkAdmin);
-    return () => window.removeEventListener('storage', checkAdmin);
-  }, []);
-
-  const allLinks = isAdmin ? [...LINKS, ...ADMIN_LINKS] : LINKS;
 
   return (
     <>
@@ -104,6 +95,42 @@ export default function Navbar() {
           >
             {dark ? "LIGHT" : "DARK"}
           </button>
+
+          {/* Admin login / logout */}
+          {isAdmin ? (
+            <button
+              onClick={logout}
+              style={{
+                background: "rgba(255,255,255,0.15)",
+                border: "none",
+                borderRadius: "20px",
+                cursor: "pointer",
+                color: "#fff",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                letterSpacing: "0.05em",
+                padding: "0.3rem 0.75rem",
+              }}
+            >
+              LOGOUT
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              style={{
+                background: "rgba(255,255,255,0.15)",
+                borderRadius: "20px",
+                color: "#fff",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                letterSpacing: "0.05em",
+                padding: "0.3rem 0.75rem",
+                textDecoration: "none",
+              }}
+            >
+              ADMIN
+            </Link>
+          )}
 
           {/* Hamburger (hidden on desktop via media query) */}
           <button

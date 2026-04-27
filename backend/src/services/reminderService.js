@@ -15,7 +15,7 @@
 
 const Student = require('../models/studentModel');
 const School  = require('../models/schoolModel');
-const { sendFeeReminder } = require('./notificationService');
+const { sendFeeReminder, verifySmtp } = require('./notificationService');
 const config = require('../config');
 const logger = require('../utils/logger').child('ReminderService');
 
@@ -27,6 +27,8 @@ const {
 
 let _timer  = null;
 let _running = false;
+let _lastRunAt = null;
+let _lastRunSummary = null;
 
 /**
  * Check if SMTP is properly configured
@@ -62,6 +64,13 @@ async function processReminders() {
   if (!isSmtpConfigured()) {
     logger.warn('SMTP not configured — skipping reminder run');
     return { schools: 0, eligible: 0, sent: 0, failed: 0, skipped: 0, smtpNotConfigured: true };
+  }
+
+  // Verify SMTP connectivity before processing any students
+  const smtpCheck = await verifySmtp();
+  if (!smtpCheck.ok) {
+    logger.error('SMTP verification failed — aborting reminder run to prevent quota consumption', { error: smtpCheck.error });
+    return { schools: 0, eligible: 0, sent: 0, failed: 0, skipped: 0, smtpVerifyFailed: true, smtpError: smtpCheck.error };
   }
 
   const summary = { schools: 0, eligible: 0, sent: 0, failed: 0, skipped: 0 };
@@ -134,8 +143,12 @@ async function runReminders() {
 
   try {
     const summary = await processReminders();
+    _lastRunAt = new Date().toISOString();
+    _lastRunSummary = { sent: summary.sent, failed: summary.failed, skipped: summary.skipped };
     logger.info('Reminder run complete', summary);
   } catch (err) {
+    _lastRunAt = new Date().toISOString();
+    _lastRunSummary = { sent: 0, failed: 0, skipped: 0, error: err.message };
     logger.error('Reminder run failed', { error: err.message });
   } finally {
     _running = false;
@@ -165,4 +178,12 @@ function stopReminderScheduler() {
   }
 }
 
-module.exports = { startReminderScheduler, stopReminderScheduler, processReminders };
+function getReminderStatus() {
+  return {
+    schedulerRunning: _timer !== null,
+    lastRunAt: _lastRunAt,
+    lastRunSummary: _lastRunSummary,
+  };
+}
+
+module.exports = { startReminderScheduler, stopReminderScheduler, processReminders, getReminderStatus };

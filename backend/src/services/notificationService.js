@@ -18,6 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
 const config = require('../config');
 const logger = require('../utils/logger').child('NotificationService');
 
@@ -50,16 +51,6 @@ function getTransporter() {
     return null;
   }
 
-  // Lazy require — only load nodemailer when SMTP is actually configured.
-  // This prevents a crash at startup when the package is not yet installed.
-  let nodemailer;
-  try {
-    nodemailer = require('nodemailer');
-  } catch {
-    logger.warn('nodemailer is not installed — run `npm install` in the backend directory.');
-    return null;
-  }
-
   _transporter = nodemailer.createTransport({
     host:   config.SMTP_HOST,
     port:   config.SMTP_PORT,
@@ -71,6 +62,24 @@ function getTransporter() {
   });
 
   return _transporter;
+}
+
+/**
+ * Verify SMTP connectivity using nodemailer's built-in verify().
+ * Returns { ok: true } on success, { ok: false, error } on failure.
+ */
+async function verifySmtp() {
+  const transporter = getTransporter();
+  if (!transporter) {
+    return { ok: false, error: 'SMTP not configured' };
+  }
+  try {
+    await transporter.verify();
+    return { ok: true };
+  } catch (err) {
+    logger.error('SMTP verification failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
@@ -138,4 +147,4 @@ async function sendFeeReminder(opts) {
   return { sent: true, messageId: info.messageId };
 }
 
-module.exports = { sendFeeReminder };
+module.exports = { sendFeeReminder, verifySmtp };

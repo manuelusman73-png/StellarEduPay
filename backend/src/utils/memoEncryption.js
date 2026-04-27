@@ -1,12 +1,24 @@
 'use strict';
 
 /**
- * Optional memo encryption using AES-256-GCM.
+ * Memo encryption utilities (AES-256-GCM).
  *
- * Enabled when MEMO_ENCRYPTION_KEY is set to a 64-char hex string (32 bytes).
- * Encrypted memos are base64url-encoded and fit within Stellar's 28-char memo
- * limit only when the student ID is short; callers should use text memos for
- * plain IDs and hash memos for encrypted payloads (Stellar hash memo = 32 bytes).
+ * ⚠️  UNSUPPORTED — DO NOT SET MEMO_ENCRYPTION_KEY IN PRODUCTION.
+ *
+ * The server will refuse to start if MEMO_ENCRYPTION_KEY is set (see
+ * backend/src/config/index.js). This module is retained only so that existing
+ * call-sites (encryptMemo / decryptMemo) continue to compile; with no key set,
+ * both functions are no-ops that return the input unchanged.
+ *
+ * Why encryption is incompatible with Stellar MEMO_TEXT:
+ *   AES-256-GCM output = 12-byte IV + ciphertext + 16-byte auth tag.
+ *   For the shortest possible input (1 char), that is 29 binary bytes.
+ *   base64url(29 bytes) = 40 characters, which exceeds Stellar's hard
+ *   28-byte MEMO_TEXT limit. There is no student ID short enough to fit.
+ *
+ *   Using MEMO_HASH instead would require the sync engine to handle
+ *   memo_type === 'hash' and decrypt on the fly — that path is not
+ *   implemented, so encrypted hash memos are silently dropped.
  *
  * Format (base64url of): <12-byte IV> + <ciphertext> + <16-byte auth tag>
  */
