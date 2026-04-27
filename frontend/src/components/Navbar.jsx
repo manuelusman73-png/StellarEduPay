@@ -12,13 +12,31 @@ const LINKS = [
   { href: "/fee-adjustments", label: "Fee Rules" },
 ];
 
+// Admin-only links — shown only when a JWT token is present in localStorage.
+const ADMIN_LINKS = [
+  { href: "/disputes", label: "Disputes" },
+];
+
 export default function Navbar() {
   const { pathname } = useRouter();
   const [open, setOpen] = useState(false);
   const { dark, toggle } = useTheme();
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Close the mobile menu on every route change, including browser back/forward.
   useEffect(() => { setOpen(false); }, [pathname]);
+
+  // Detect admin JWT presence on mount and on storage changes.
+  useEffect(() => {
+    function checkAdmin() {
+      setIsAdmin(typeof window !== 'undefined' && !!localStorage.getItem('token'));
+    }
+    checkAdmin();
+    window.addEventListener('storage', checkAdmin);
+    return () => window.removeEventListener('storage', checkAdmin);
+  }, []);
+
+  const allLinks = isAdmin ? [...LINKS, ...ADMIN_LINKS] : LINKS;
 
   return (
     <>
@@ -54,7 +72,7 @@ export default function Navbar() {
 
         {/* Desktop links */}
         <div className="nav-links" style={{ display: "flex", gap: "1.75rem" }}>
-          {LINKS.map(({ href, label }) => (
+          {allLinks.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
@@ -111,7 +129,7 @@ export default function Navbar() {
 
       {/* Mobile dropdown */}
       <div className={`nav-mobile${open ? " open" : ""}`}>
-        {LINKS.map(({ href, label }) => (
+        {allLinks.map(({ href, label }) => (
           <Link
             key={href}
             href={href}
