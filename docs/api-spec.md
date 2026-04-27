@@ -20,6 +20,7 @@ All error responses follow the [Error Responses](#error-responses) format.
 - [Disputes](#disputes)
 - [Reminders](#reminders)
 - [Retry Queue](#retry-queue)
+- [Audit Logs](#audit-logs)
 - [Health Check](#health-check)
 - [Admin](#admin)
 - [Error Responses](#error-responses)
@@ -304,6 +305,26 @@ Returns students whose `paymentDeadline` has passed and `feePaid` is false.
 
 **Response `200`** — array of student objects with `isOverdue: true`.
 
+### Reset student payment status — admin only
+```
+POST /api/students/:studentId/reset-payment
+Authorization: Bearer <token>
+X-School-ID: SCH-3F2A
+```
+Resets a student's `feePaid` flag and `totalPaid` balance to zero. Optionally deletes associated payment records.
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `deletePayments` | boolean | No | If `true`, permanently deletes all payment records for the student (default: `false`) |
+
+**Response `200`**
+```json
+{ "message": "Payment status reset for STU001", "studentId": "STU001", "deletePayments": false }
+```
+**Errors** — `404 NOT_FOUND` if student not found.
+
 ---
 
 ## Fee Structures
@@ -567,6 +588,24 @@ GET /api/payments
 X-School-ID: SCH-3F2A
 ```
 **Response `200`** — array of payment objects for the school.
+
+### Get payment summary
+```
+GET /api/payments/summary
+X-School-ID: SCH-3F2A
+```
+Returns aggregated payment statistics for the school.
+
+**Response `200`**
+```json
+{
+  "totalStudents": 120,
+  "paidCount": 85,
+  "unpaidCount": 35,
+  "totalXlmCollected": 21250,
+  "categoryBreakdown": []
+}
+```
 
 ### Get payment history for a student
 ```
@@ -1033,6 +1072,52 @@ Authorization: Bearer <token>
 ```json
 { "jobId": "42", "txHash": "a1b2..." }
 ```
+
+---
+
+## Audit Logs
+
+All audit log routes require admin auth and school context.
+
+### Get audit logs — admin only
+```
+GET /api/audit-logs
+Authorization: Bearer <token>
+X-School-ID: SCH-3F2A
+```
+Returns a paginated list of audit log entries for the school.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `page` | number | Page number (default: `1`) |
+| `limit` | number | Results per page (default: `50`, max `200`) |
+| `action` | string | Filter by action type (e.g. `payment.verified`, `student.created`) |
+
+**Response `200`**
+```json
+{
+  "logs": [
+    { "_id": "...", "schoolId": "SCH-3F2A", "action": "payment.verified", "actor": "admin", "meta": {}, "createdAt": "2026-03-24T10:00:00.000Z" }
+  ],
+  "total": 1, "page": 1, "limit": 50
+}
+```
+
+### Get recent audit logs — admin only
+```
+GET /api/audit-logs/recent
+Authorization: Bearer <token>
+X-School-ID: SCH-3F2A
+```
+**Query parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `limit` | number | Number of entries to return (default: `10`) |
+
+**Response `200`** — array of the most recent audit log entries.
 
 ---
 
