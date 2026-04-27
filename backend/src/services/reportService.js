@@ -10,7 +10,7 @@ const FeeStructure = require('../models/feeStructureModel');
  * @param {{ schoolId: string, startDate?: string, endDate?: string }} options
  */
 async function aggregateByDate({ schoolId, startDate, endDate } = {}) {
-  const match = { schoolId, status: 'confirmed', studentDeleted: { $ne: true } };
+  const match = { schoolId, status: 'SUCCESS', studentDeleted: { $ne: true } };
 
   if (startDate || endDate) {
     match.confirmedAt = {};
@@ -70,7 +70,7 @@ async function generateReport({ schoolId, startDate, endDate } = {}) {
   );
 
   // Count students who have fully paid within the period
-  const match = { schoolId, status: 'confirmed', studentDeleted: { $ne: true } };
+  const match = { schoolId, status: 'SUCCESS', studentDeleted: { $ne: true } };
   if (startDate || endDate) {
     match.confirmedAt = {};
     if (startDate) match.confirmedAt.$gte = new Date(startDate + 'T00:00:00.000Z');
