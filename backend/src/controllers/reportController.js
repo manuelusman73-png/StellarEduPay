@@ -54,10 +54,10 @@ async function getReport(req, res, next) {
 }
 
 function buildFilename(startDate, endDate) {
-  const parts = ['school-payment-report'];
-  if (startDate) parts.push(startDate);
-  if (endDate) parts.push(endDate);
-  return `${parts.join('_')}.csv`;
+  if (startDate && endDate) return `report-${startDate}-to-${endDate}.csv`;
+  if (startDate) return `report-${startDate}-to-all-time.csv`;
+  if (endDate) return `report-all-time-to-${endDate}.csv`;
+  return 'report-all-time.csv';
 }
 
 /**

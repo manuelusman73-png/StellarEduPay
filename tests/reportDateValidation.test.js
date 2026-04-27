@@ -125,3 +125,35 @@ describe('GET /api/reports — date validation (#389)', () => {
     });
   });
 });
+
+describe('GET /api/reports — Content-Disposition filename (#469)', () => {
+  async function getCsvHeaders(query) {
+    const req = makeReq(query);
+    const res = makeRes();
+    await getReport(req, res, () => {});
+    // Collect all setHeader calls into a map
+    const headers = {};
+    res.setHeader.mock.calls.forEach(([k, v]) => { headers[k] = v; });
+    return headers;
+  }
+
+  it('sets filename with date range when both dates provided', async () => {
+    const headers = await getCsvHeaders({ startDate: '2026-01-01', endDate: '2026-03-31', format: 'csv' });
+    expect(headers['Content-Disposition']).toBe('attachment; filename="report-2026-01-01-to-2026-03-31.csv"');
+  });
+
+  it('sets report-all-time.csv when no dates provided', async () => {
+    const headers = await getCsvHeaders({ format: 'csv' });
+    expect(headers['Content-Disposition']).toBe('attachment; filename="report-all-time.csv"');
+  });
+
+  it('sets partial filename when only startDate provided', async () => {
+    const headers = await getCsvHeaders({ startDate: '2026-01-01', format: 'csv' });
+    expect(headers['Content-Disposition']).toBe('attachment; filename="report-2026-01-01-to-all-time.csv"');
+  });
+
+  it('sets partial filename when only endDate provided', async () => {
+    const headers = await getCsvHeaders({ endDate: '2026-03-31', format: 'csv' });
+    expect(headers['Content-Disposition']).toBe('attachment; filename="report-all-time-to-2026-03-31.csv"');
+  });
+});
