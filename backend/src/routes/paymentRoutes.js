@@ -44,7 +44,7 @@ const { resolveSchool } = require("../middleware/schoolContext");
 const idempotency = require("../middleware/idempotency");
 const { requireAdminAuth } = require("../middleware/auth");
 const { auditContext } = require("../middleware/auditContext");
-const { strictLimiter } = require("../middleware/rateLimiter");
+const { strictLimiter, verifyLimiter } = require("../middleware/rateLimiter");
 
 // No school context required
 router.get("/verify/:txHash", validateTxHashParam, verifyTransactionHash);
@@ -83,7 +83,7 @@ router.get("/dlq", getDeadLetterJobs);
 
 router.post(
   "/verify",
-  strictLimiter,
+  verifyLimiter,
   idempotency,
   validateVerifyPayment,
   verifyPayment,

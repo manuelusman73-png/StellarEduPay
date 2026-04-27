@@ -1,13 +1,16 @@
-const { server, SCHOOL_WALLET } = require('../config/stellarConfig');
+'use strict';
+
+const { server } = require('../config/stellarConfig');
 const Payment = require('../models/paymentModel');
-const Student = require('../models/studentModel');
+const School = require('../models/schoolModel');
 
 /**
- * Fetch all transactions for the school wallet from Horizon (up to 200).
+ * Fetch up to 200 transactions for a given wallet address from Horizon.
+ * @param {string} walletAddress
  */
-async function fetchChainTransactions() {
+async function fetchChainTransactions(walletAddress) {
   const result = await server.transactions()
-    .forAccount(SCHOOL_WALLET)
+    .forAccount(walletAddress)
     .order('desc')
     .limit(200)
     .call();
@@ -15,24 +18,23 @@ async function fetchChainTransactions() {
 }
 
 /**
- * Compare DB payments against on-chain transactions and return mismatches.
+ * Check consistency for a single school.
  *
- * Mismatch types:
- *  - missing_on_chain : payment recorded in DB but not found on Stellar
- *  - amount_mismatch  : DB amount differs from on-chain amount
- *  - student_mismatch : DB studentId doesn't match the tx memo
+ * @param {{ schoolId: string, stellarAddress: string }} school
  */
-async function checkConsistency() {
+async function checkSchoolConsistency({ schoolId, stellarAddress }) {
   const [dbPayments, chainTxs] = await Promise.all([
-    Payment.find({}).lean(),
-    fetchChainTransactions(),
+    Payment.find({ schoolId }).lean(),
+    fetchChainTransactions(stellarAddress),
   ]);
 
   // Build a map of txHash → on-chain tx for O(1) lookup
   const chainMap = new Map();
   for (const tx of chainTxs) {
     const ops = await tx.operations();
-    const payOp = ops.records.find(op => op.type === 'payment' && op.to === SCHOOL_WALLET);
+    const payOp = ops.records.find(
+      (op) => op.type === 'payment' && op.to === stellarAddress
+    );
     if (payOp) {
       chainMap.set(tx.hash, {
         hash: tx.hash,
@@ -81,11 +83,46 @@ async function checkConsistency() {
   }
 
   return {
-    checkedAt: new Date().toISOString(),
+    schoolId,
     totalDbPayments: dbPayments.length,
     totalChainTxsScanned: chainMap.size,
     mismatchCount: mismatches.length,
     mismatches,
+  };
+}
+
+/**
+ * Compare DB payments against on-chain transactions for ALL active schools.
+ *
+ * Mismatch types:
+ *  - missing_on_chain : payment recorded in DB but not found on Stellar
+ *  - amount_mismatch  : DB amount differs from on-chain amount
+ *  - student_mismatch : DB studentId doesn't match the tx memo
+ */
+async function checkConsistency() {
+  const schools = await School.find({ isActive: true }).lean();
+
+  const schoolResults = await Promise.all(
+    schools.map((school) =>
+      checkSchoolConsistency({
+        schoolId: school.schoolId,
+        stellarAddress: school.stellarAddress,
+      })
+    )
+  );
+
+  const totalDbPayments = schoolResults.reduce((s, r) => s + r.totalDbPayments, 0);
+  const totalChainTxsScanned = schoolResults.reduce((s, r) => s + r.totalChainTxsScanned, 0);
+  const allMismatches = schoolResults.flatMap((r) => r.mismatches);
+
+  return {
+    checkedAt: new Date().toISOString(),
+    schoolsChecked: schools.length,
+    totalDbPayments,
+    totalChainTxsScanned,
+    mismatchCount: allMismatches.length,
+    mismatches: allMismatches,
+    bySchool: schoolResults,
   };
 }
 
