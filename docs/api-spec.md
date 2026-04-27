@@ -1555,3 +1555,51 @@ Deactivate a fee adjustment rule (soft delete — sets `isActive: false`).
 | 401 | `MISSING_AUTH_TOKEN` | No Bearer token provided |
 | 403 | `INSUFFICIENT_ROLE` | Token does not have admin role |
 | 404 | `NOT_FOUND` | No rule found with the given id for this school |
+
+---
+
+## Consistency Check
+
+### Run consistency check — admin only
+
+Compares on-chain Stellar transactions against the local database and returns a report of any discrepancies (missing payments, amount mismatches, student ID mismatches).
+
+> **Authentication required.** This endpoint exposes sensitive financial and student data. Unauthenticated requests receive `401 Unauthorized`.
+
+```
+GET /api/consistency
+Authorization: Bearer <token>
+```
+
+**Response `200`**
+```json
+{
+  "checkedAt": "2026-03-24T10:00:00.000Z",
+  "totalDbPayments": 42,
+  "totalChainTxsScanned": 40,
+  "mismatchCount": 1,
+  "mismatches": [
+    {
+      "type": "missing_on_chain",
+      "txHash": "abc123...",
+      "message": "Payment recorded in DB but not found on-chain"
+    }
+  ]
+}
+```
+
+**Mismatch types**
+
+| Type | Description |
+|---|---|
+| `missing_on_chain` | Payment exists in DB but the transaction hash was not found on the Stellar ledger |
+| `amount_mismatch` | DB amount differs from the amount recorded on-chain |
+| `student_mismatch` | DB student ID differs from the memo field of the on-chain transaction |
+
+**Error responses**
+
+| Status | Code | Description |
+|---|---|---|
+| `401` | `MISSING_AUTH_TOKEN` | No Bearer token provided |
+| `401` | `INVALID_AUTH_TOKEN` | Token is invalid or expired |
+| `403` | `INSUFFICIENT_ROLE` | Token does not carry `role: admin` |

@@ -45,6 +45,11 @@ async function healthCheck(req, res) {
 
   const { queueDepth, maxQueueDepth } = concurrentPaymentProcessor.getStats();
 
+  // Retry queue backend info
+  const retrySelector = require('../services/retryServiceSelector');
+  const retryBackend = retrySelector.getSelectedBackend();
+  const redisConfigured = Boolean(process.env.REDIS_HOST);
+
   const body = {
     status: allHealthy ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
@@ -64,6 +69,11 @@ async function healthCheck(req, res) {
       paymentProcessor: {
         queueDepth,
         maxQueueDepth,
+      },
+      retryQueue: {
+        backend: retryBackend || 'not_started',
+        redisConfigured,
+        ...(redisConfigured && { redisHost: process.env.REDIS_HOST }),
       },
     },
   };
