@@ -30,6 +30,7 @@ const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSe
 const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
 const { createConcurrentRequestMiddleware } = require('./middleware/concurrentRequestHandler');
+const { requireAdminAuth } = require('./middleware/auth');
 const { runConsistencyCheck } = require('./controllers/consistencyController');
 const { healthCheck } = require('./controllers/healthController');
 const logger = require('./utils/logger');
@@ -85,7 +86,7 @@ app.use('/api/source-rules', sourceValidationRuleRoutes);
 app.use('/api/receipts', receiptsRoutes);
 app.use('/api/fee-adjustments', feeAdjustmentRoutes);
 app.use('/api/admin', adminRoutes);
-app.get('/api/consistency', runConsistencyCheck);
+app.get('/api/consistency', requireAdminAuth, runConsistencyCheck);
 app.get('/health', healthCheck);
 
 // ── Error handling ────────────────────────────────────────────────────────────
