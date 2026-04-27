@@ -824,6 +824,15 @@ async function getStudentPayments(req, res, next) {
     const network =
       process.env.STELLAR_NETWORK === "mainnet" ? "public" : "testnet";
 
+    // Return 404 if the student has been deleted
+    const student = await Student.findOne({
+      schoolId: req.schoolId,
+      studentId: req.params.studentId,
+    });
+    if (!student) {
+      return res.status(404).json({ error: "Student not found", code: "NOT_FOUND" });
+    }
+
     // Pagination parameters
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
@@ -867,6 +876,7 @@ async function getStudentPayments(req, res, next) {
     next(err);
   }
 }
+
 
 // Compute once at startup — changes only when stellarConfig changes.
 const _acceptedAssetsBody = JSON.stringify({
@@ -1154,7 +1164,7 @@ async function getAllPayments(req, res, next) {
       isSuspicious,
     } = req.query;
 
-    const filter = { schoolId };
+    const filter = { schoolId, studentDeleted: { $ne: true } };
 
     if (startDate || endDate) {
       filter.confirmedAt = {};
@@ -1422,12 +1432,12 @@ async function getPaymentSummary(req, res, next) {
         },
       ]),
       Payment.aggregate([
-        { $match: { schoolId, status: "SUCCESS", deletedAt: null } },
+        { $match: { schoolId, status: "SUCCESS", deletedAt: null, studentDeleted: { $ne: true } } },
         { $group: { _id: null, totalXlmCollected: { $sum: "$amount" } } },
       ]),
       // Get per-category statistics
       Payment.aggregate([
-        { $match: { schoolId, status: "SUCCESS", deletedAt: null, feeCategory: { $ne: null } } },
+        { $match: { schoolId, status: "SUCCESS", deletedAt: null, studentDeleted: { $ne: true }, feeCategory: { $ne: null } } },
         {
           $group: {
             _id: "$feeCategory",

@@ -42,6 +42,9 @@ const paymentSchema = new mongoose.Schema(
     // Reference code
     referenceCode: { type: String, default: null },
 
+    // Orphan flag — set to true when the associated student is deleted
+    studentDeleted: { type: Boolean, default: false, index: true },
+
     // Soft Delete
     deletedAt: { type: Date, default: null, index: true },
   },

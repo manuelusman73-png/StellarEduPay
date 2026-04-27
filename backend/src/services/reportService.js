@@ -10,7 +10,7 @@ const FeeStructure = require('../models/feeStructureModel');
  * @param {{ schoolId: string, startDate?: string, endDate?: string }} options
  */
 async function aggregateByDate({ schoolId, startDate, endDate } = {}) {
-  const match = { schoolId, status: 'confirmed' };
+  const match = { schoolId, status: 'confirmed', studentDeleted: { $ne: true } };
 
   if (startDate || endDate) {
     match.confirmedAt = {};
@@ -70,7 +70,7 @@ async function generateReport({ schoolId, startDate, endDate } = {}) {
   );
 
   // Count students who have fully paid within the period
-  const match = { schoolId, status: 'confirmed' };
+  const match = { schoolId, status: 'confirmed', studentDeleted: { $ne: true } };
   if (startDate || endDate) {
     match.confirmedAt = {};
     if (startDate) match.confirmedAt.$gte = new Date(startDate + 'T00:00:00.000Z');
@@ -185,13 +185,13 @@ async function getDashboardMetrics({ schoolId } = {}) {
 
     // All-time confirmed payment totals
     Payment.aggregate([
-      { $match: { schoolId, status: 'SUCCESS' } },
+      { $match: { schoolId, status: 'SUCCESS', studentDeleted: { $ne: true } } },
       { $group: { _id: null, totalCollected: { $sum: '$amount' }, count: { $sum: 1 } } },
     ]),
 
     // Today's payments
     Payment.aggregate([
-      { $match: { schoolId, status: 'SUCCESS', confirmedAt: { $gte: startOfToday } } },
+      { $match: { schoolId, status: 'SUCCESS', studentDeleted: { $ne: true }, confirmedAt: { $gte: startOfToday } } },
       { $group: { _id: null, totalCollected: { $sum: '$amount' }, count: { $sum: 1 } } },
     ]),
 
@@ -223,7 +223,7 @@ async function getDashboardMetrics({ schoolId } = {}) {
     ]),
 
     // 5 most recent successful payments
-    Payment.find({ schoolId, status: 'SUCCESS' })
+    Payment.find({ schoolId, status: 'SUCCESS', studentDeleted: { $ne: true } })
       .sort({ confirmedAt: -1 })
       .limit(5)
       .select('txHash studentId amount feeValidationStatus confirmedAt')

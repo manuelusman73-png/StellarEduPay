@@ -280,7 +280,7 @@ DELETE /api/students/:studentId
 Authorization: Bearer <token>
 X-School-ID: SCH-3F2A
 ```
-Soft-deletes the student (sets `deletedAt`). **Response `200`**
+Soft-deletes the student (sets `deletedAt`). All associated payment records are marked with `studentDeleted: true` and excluded from reports and reconciliation queries. **Response `200`**
 ```json
 { "message": "Student deleted" }
 ```
@@ -583,6 +583,8 @@ X-School-ID: SCH-3F2A
   "isSuspicious": false, "confirmedAt": "2026-03-24T10:00:00.000Z"
 }]
 ```
+
+**Response `404`** — returned when the student has been deleted. Orphaned payment records for deleted students are not returned.
 
 ### Get student balance
 ```

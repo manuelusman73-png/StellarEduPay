@@ -141,6 +141,14 @@ async function deleteStudent(req, res, next) {
       err.code = 'NOT_FOUND';
       return next(err);
     }
+
+    // Mark all associated payments as orphaned so they are excluded from reports
+    const Payment = require('../models/paymentModel');
+    await Payment.updateMany(
+      { schoolId: req.schoolId, studentId },
+      { studentDeleted: true },
+    );
+
     del(KEYS.student(studentId));
 
     // Audit log
