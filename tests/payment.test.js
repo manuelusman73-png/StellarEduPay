@@ -332,10 +332,19 @@ describe('Payment API', () => {
     expect(res.body).toHaveProperty('code', 'DUPLICATE_TX');
   });
 
-  test('GET /api/payments/accepted-assets — returns XLM and USDC', async () => {
+  test('GET /api/payments/accepted-assets — returns assets with cache headers', async () => {
     const res = await testApi.get('/api/payments/accepted-assets');
     expect(res.status).toBe(200);
     expect(res.body.assets.map(a => a.code)).toEqual(expect.arrayContaining(['XLM', 'USDC']));
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    expect(res.headers['etag']).toMatch(/^"[0-9a-f]+"$/);
+  });
+
+  test('GET /api/payments/accepted-assets — returns 304 on matching If-None-Match', async () => {
+    const first = await testApi.get('/api/payments/accepted-assets');
+    const etag = first.headers['etag'];
+    const second = await testApi.get('/api/payments/accepted-assets').set('If-None-Match', etag);
+    expect(second.status).toBe(304);
   });
 });
 

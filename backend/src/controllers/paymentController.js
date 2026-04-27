@@ -868,15 +868,26 @@ async function getStudentPayments(req, res, next) {
   }
 }
 
+// Compute once at startup — changes only when stellarConfig changes.
+const _acceptedAssetsBody = JSON.stringify({
+  assets: Object.values(ACCEPTED_ASSETS).map((a) => ({
+    code: a.code,
+    type: a.type,
+    displayName: a.displayName,
+  })),
+});
+const _acceptedAssetsETag = `"${crypto.createHash('sha1').update(_acceptedAssetsBody).digest('hex')}"`;
+
 async function getAcceptedAssets(req, res, next) {
   try {
-    res.json({
-      assets: Object.values(ACCEPTED_ASSETS).map((a) => ({
-        code: a.code,
-        type: a.type,
-        displayName: a.displayName,
-      })),
-    });
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.set('ETag', _acceptedAssetsETag);
+
+    if (req.headers['if-none-match'] === _acceptedAssetsETag) {
+      return res.status(304).end();
+    }
+
+    res.type('json').send(_acceptedAssetsBody);
   } catch (err) {
     next(err);
   }

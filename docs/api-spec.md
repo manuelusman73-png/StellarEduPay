@@ -599,10 +599,22 @@ X-School-ID: SCH-3F2A
 GET /api/payments/accepted-assets
 X-School-ID: SCH-3F2A
 ```
+This endpoint is safe to cache. The response never changes at runtime (assets are fixed by server configuration).
+
+**Response headers**
+| Header | Value | Description |
+|--------|-------|-------------|
+| `Cache-Control` | `public, max-age=3600` | Browsers and CDNs may cache the response for 1 hour. |
+| `ETag` | `"<sha1>"` | Fingerprint of the current asset list. Use with `If-None-Match` for conditional requests. |
+
+**Conditional requests** — send the `ETag` value back as `If-None-Match` on subsequent requests. The server returns `304 Not Modified` (no body) when the asset list has not changed, saving bandwidth.
+
 **Response `200`**
 ```json
 { "assets": [{ "code": "XLM", "type": "native", "displayName": "Stellar Lumens" }] }
 ```
+
+**Response `304`** — returned when `If-None-Match` matches the current ETag. No response body.
 
 ### Get payment limits
 ```
