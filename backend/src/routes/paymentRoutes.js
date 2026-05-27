@@ -31,6 +31,7 @@ const {
   streamPaymentEvents,
   getPaymentSummary,
   updatePaymentStatus,
+  getStuckPayments,
 } = require("../controllers/paymentController");
 
 const {
@@ -77,6 +78,7 @@ router.get("/events", streamPaymentEvents);
 router.get("/overpayments", getOverpayments);
 router.get("/suspicious", getSuspiciousPayments);
 router.get("/pending", getPendingPayments);
+router.get("/stuck", requireAdminAuth, getStuckPayments);
 router.get("/retry-queue", requireAdminAuth, getRetryQueue);
 router.get("/rates", getExchangeRates);
 router.get("/dlq", getDeadLetterJobs);

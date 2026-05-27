@@ -13,6 +13,10 @@ const webhookRetrySchema = new mongoose.Schema(
     url: { type: String, required: true, index: true },
     event: { type: String, required: true, enum: ['payment.confirmed', 'payment.pending', 'payment.failed', 'payment.suspicious'] },
     payload: { type: mongoose.Schema.Types.Mixed, required: true },
+    secret: { type: String, default: null }, // HMAC secret for re-signing on retry
+
+    // Delivery tracking for deduplication
+    deliveryId: { type: String, required: true, index: true, unique: true },
 
     // Retry tracking
     status: {

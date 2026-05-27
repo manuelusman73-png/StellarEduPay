@@ -7,14 +7,17 @@
  *   POST /api/reminders/trigger  — manually fire a reminder run
  *   GET  /api/reminders/preview  — list students who would receive a reminder
  *   POST /api/reminders/opt-out  — opt a student's parent out of reminders
+ *   GET  /api/reminders/unsubscribe — public endpoint to unsubscribe via token
+ *   POST /api/students/:studentId/reminders/resubscribe — admin endpoint to re-enable reminders
  */
 
 const Student = require('../models/studentModel');
 const { processReminders } = require('../services/reminderService');
+const { generateUnsubscribeToken, verifyUnsubscribeToken } = require('../utils/unsubscribeToken');
 const config = require('../config');
 const logger = require('../utils/logger').child('ReminderController');
 
-const { REMINDER_COOLDOWN_HOURS, REMINDER_MAX_COUNT } = config;
+const { REMINDER_COOLDOWN_HOURS, REMINDER_MAX_COUNT, JWT_SECRET } = config;
 
 /**
  * POST /api/reminders/trigger
@@ -101,4 +104,82 @@ async function setOptOut(req, res, next) {
   }
 }
 
-module.exports = { triggerReminders, previewReminders, setOptOut };
+/**
+ * GET /api/reminders/unsubscribe?token=<token>
+ * Public endpoint (no auth required) to unsubscribe from reminders via signed token.
+ * Returns HTML confirmation page or JSON response.
+ */
+async function unsubscribeViaToken(req, res, next) {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({ error: 'token query parameter is required', code: 'VALIDATION_ERROR' });
+    }
+
+    const verification = verifyUnsubscribeToken(token, JWT_SECRET);
+    if (!verification.valid) {
+      return res.status(400).json({ error: verification.error, code: 'INVALID_TOKEN' });
+    }
+
+    const { studentId, schoolId } = verification;
+    const student = await Student.findOneAndUpdate(
+      { schoolId, studentId },
+      { $set: { reminderOptOut: true } },
+      { new: true }
+    ).select('studentId name reminderOptOut');
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found', code: 'NOT_FOUND' });
+    }
+
+    // Return HTML confirmation page
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Unsubscribed</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 40px; }
+          .success { color: green; }
+        </style>
+      </head>
+      <body>
+        <h1 class="success">✓ Unsubscribed</h1>
+        <p>You have been unsubscribed from fee reminders for student <strong>${student.name}</strong> (ID: ${student.studentId}).</p>
+        <p>You can resubscribe at any time by contacting your school administrator.</p>
+      </body>
+      </html>
+    `;
+    res.type('text/html').send(html);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/students/:studentId/reminders/resubscribe
+ * Admin-only endpoint to re-enable reminders for a student.
+ */
+async function resubscribeReminders(req, res, next) {
+  try {
+    const { schoolId } = req;
+    const { studentId } = req.params;
+
+    const student = await Student.findOneAndUpdate(
+      { schoolId, studentId },
+      { $set: { reminderOptOut: false } },
+      { new: true }
+    ).select('studentId name reminderOptOut');
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found', code: 'NOT_FOUND' });
+    }
+
+    res.json({ studentId: student.studentId, name: student.name, reminderOptOut: student.reminderOptOut });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { triggerReminders, previewReminders, setOptOut, unsubscribeViaToken, resubscribeReminders };

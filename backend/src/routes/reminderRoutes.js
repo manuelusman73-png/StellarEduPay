@@ -5,9 +5,12 @@ const router  = express.Router();
 const { requireAdminAuth } = require('../middleware/auth');
 const { resolveSchool } = require('../middleware/schoolContext');
 const { reminderTriggerLimiter } = require('../middleware/rateLimiter');
-const { triggerReminders, previewReminders, setOptOut } = require('../controllers/reminderController');
+const { triggerReminders, previewReminders, setOptOut, unsubscribeViaToken, resubscribeReminders } = require('../controllers/reminderController');
 
-// All reminder routes require admin auth + school context
+// Public unsubscribe endpoint (no auth required)
+router.get('/unsubscribe', unsubscribeViaToken);
+
+// All other reminder routes require admin auth + school context
 router.use(requireAdminAuth);
 router.use(resolveSchool);
 

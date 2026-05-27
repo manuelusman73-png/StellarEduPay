@@ -1490,6 +1490,35 @@ function streamPaymentEvents(req, res) {
   });
 }
 
+/**
+ * GET /api/payments/stuck
+ * Admin-only. List payments in SUBMITTED status older than the threshold.
+ */
+async function getStuckPayments(req, res, next) {
+  try {
+    const { findStuckPayments, STUCK_PAYMENT_THRESHOLD_MS } = require('../services/stuckPaymentReconciliation');
+    
+    const stuckPayments = await findStuckPayments();
+    
+    res.json({
+      count: stuckPayments.length,
+      thresholdMs: STUCK_PAYMENT_THRESHOLD_MS,
+      thresholdMinutes: Math.round(STUCK_PAYMENT_THRESHOLD_MS / 60000),
+      payments: stuckPayments.map(p => ({
+        txHash: p.txHash,
+        studentId: p.studentId,
+        amount: p.amount,
+        status: p.status,
+        submittedAt: p.submittedAt,
+        confirmedAt: p.confirmedAt,
+        schoolId: p.schoolId,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // Allowed manual status transitions: from → [to, ...]
 const ALLOWED_TRANSITIONS = {
   SUCCESS:   ['DISPUTED'],
@@ -1579,4 +1608,5 @@ module.exports = {
   streamPaymentEvents,
   getPaymentSummary,
   updatePaymentStatus,
+  getStuckPayments,
 };

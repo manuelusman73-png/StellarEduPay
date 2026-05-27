@@ -175,7 +175,7 @@ async function deleteStudent(req, res, next) {
 async function updateStudent(req, res, next) {
   try {
     const { studentId } = req.params;
-    const { name, class: className, feeAmount } = req.body;
+    const { name, class: className, feeAmount, reminderOptOut } = req.body;
 
     const original = await Student.findOne({ schoolId: req.schoolId, studentId }).lean();
     if (!original) {
@@ -202,6 +202,7 @@ async function updateStudent(req, res, next) {
       }
     }
     if (feeAmount !== undefined) update.feeAmount = feeAmount;
+    if (reminderOptOut !== undefined) update.reminderOptOut = Boolean(reminderOptOut);
 
     const student = await Student.findOneAndUpdate(
       { schoolId: req.schoolId, studentId },
@@ -388,6 +389,22 @@ async function bulkImportStudents(req, res, next) {
 
     const results = { total: rows.length, created: 0, failed: 0, details: [] };
 
+    // Pre-fetch fee structures for all unique class names (one query per unique class, not per row)
+    const uniqueClasses = [...new Set(rows.map(r => r.class?.trim()).filter(Boolean))];
+    const feeStructureMap = {};
+    if (uniqueClasses.length > 0) {
+      const feeStructures = await FeeStructure.find({
+        schoolId,
+        className: { $in: uniqueClasses },
+        isActive: true,
+      }).lean();
+      feeStructures.forEach(fs => {
+        feeStructureMap[fs.className] = fs.feeAmount;
+      });
+    }
+
+    // Validate all rows first
+    const validatedRows = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const validationErrors = validateStudentRow(row);
@@ -400,8 +417,7 @@ async function bulkImportStudents(req, res, next) {
 
       let assignedFee = row.feeAmount != null && row.feeAmount !== '' ? Number(row.feeAmount) : null;
       if (assignedFee == null && row.class) {
-        const feeStructure = await FeeStructure.findOne({ schoolId, className: row.class.trim(), isActive: true });
-        if (feeStructure) assignedFee = feeStructure.feeAmount;
+        assignedFee = feeStructureMap[row.class.trim()];
       }
 
       if (assignedFee == null) {
@@ -415,24 +431,63 @@ async function bulkImportStudents(req, res, next) {
         continue;
       }
 
+      validatedRows.push({
+        index: i,
+        schoolId,
+        studentId: row.studentId.trim(),
+        name: row.name.trim(),
+        class: row.class.trim(),
+        feeAmount: assignedFee,
+        parentEmail: row.parentEmail ? row.parentEmail.trim().toLowerCase() : null,
+        parentPhone: row.parentPhone ? row.parentPhone.trim() : null,
+      });
+    }
+
+    // Process validated rows in chunks using insertMany with ordered: false
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < validatedRows.length; i += CHUNK_SIZE) {
+      const chunk = validatedRows.slice(i, i + CHUNK_SIZE);
       try {
-        const student = await Student.create({
-          schoolId,
-          studentId: row.studentId.trim(),
-          name: row.name.trim(),
-          class: row.class.trim(),
-          feeAmount: assignedFee,
-          parentEmail: row.parentEmail ? row.parentEmail.trim().toLowerCase() : null,
-          parentPhone: row.parentPhone ? row.parentPhone.trim() : null,
+        const inserted = await Student.insertMany(chunk, { ordered: false });
+        results.created += inserted.length;
+        inserted.forEach(student => {
+          const originalRow = chunk.find(r => r.studentId === student.studentId);
+          results.details.push({
+            index: originalRow.index,
+            studentId: student.studentId,
+            status: 'created',
+            _id: student._id,
+          });
         });
-        results.created++;
-        results.details.push({ index: i, studentId: student.studentId, status: 'created', _id: student._id });
       } catch (err) {
-        results.failed++;
-        const message = err.code === 11000
-          ? 'Student ID already exists in this school'
-          : err.message;
-        results.details.push({ index: i, studentId: row.studentId, status: 'failed', errors: [message] });
+        // insertMany with ordered: false throws a BulkWriteError with insertedDocs and writeErrors
+        if (err.insertedDocs) {
+          results.created += err.insertedDocs.length;
+          err.insertedDocs.forEach(student => {
+            const originalRow = chunk.find(r => r.studentId === student.studentId);
+            results.details.push({
+              index: originalRow.index,
+              studentId: student.studentId,
+              status: 'created',
+              _id: student._id,
+            });
+          });
+        }
+        if (err.writeErrors) {
+          err.writeErrors.forEach(writeErr => {
+            const failedRow = chunk[writeErr.index];
+            results.failed++;
+            const message = writeErr.err.code === 11000
+              ? 'Student ID already exists in this school'
+              : writeErr.err.message;
+            results.details.push({
+              index: failedRow.index,
+              studentId: failedRow.studentId,
+              status: 'failed',
+              errors: [message],
+            });
+          });
+        }
       }
     }
 

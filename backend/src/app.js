@@ -144,6 +144,14 @@ connectWithRetry().then(async () => {
   );
   logger.info('System config defaults ensured');
 
+  // Reconcile stuck payments on startup
+  const { reconcileStuckPayments } = require('./services/stuckPaymentReconciliation');
+  try {
+    await reconcileStuckPayments();
+  } catch (err) {
+    logger.error('Stuck payment reconciliation failed on startup', { error: err.message });
+  }
+
   startPolling();
   startConsistencyScheduler();
   retrySelector.start();
