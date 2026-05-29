@@ -70,7 +70,24 @@ async function getPaymentInstructions(req, res, next) {
   try {
     const limits = getPaymentLimits();
     const targetCurrency = req.school.localCurrency || "USD";
-    const { feeCategory } = req.query;
+    const { feeCategory, asset } = req.query;
+
+    // Validate asset parameter if provided
+    if (asset) {
+      const acceptedAssetCodes = Object.keys(ACCEPTED_ASSETS);
+      const assetCode = asset.split(':')[0]; // Handle "USDC:GABC..." format
+      if (!acceptedAssetCodes.includes(assetCode)) {
+        const supportedAssets = Object.values(ACCEPTED_ASSETS).map(a => ({
+          code: a.code,
+          displayName: a.displayName,
+        }));
+        return res.status(400).json({
+          error: `Asset ${assetCode} is not accepted by this school`,
+          code: 'ASSET_NOT_ACCEPTED',
+          supportedAssets,
+        });
+      }
+    }
 
     const student = await Student.findOne({
       schoolId: req.schoolId,
