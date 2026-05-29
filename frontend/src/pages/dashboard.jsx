@@ -112,27 +112,30 @@ export default function Dashboard() {
     <>
       <style>{`
         @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
-        .dash-wrap { max-width: 1000px; margin: 0 auto; padding: 2rem 1rem; animation: fadeUp 0.4s ease both; }
-        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-        .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+        @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .dash-wrap { max-width: 1000px; margin: 0 auto; padding: 2rem 1rem; animation: fadeUp 0.4s ease both; overflow-x: hidden; box-sizing: border-box; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; min-width: 0; overflow-wrap: break-word; min-height: 90px; }
         .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.5rem; }
         .stat-value { font-size: 1.75rem; font-weight: 700; line-height: 1; }
         .stat-sub   { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+        .skeleton { height: 1.4rem; width: 55%; border-radius: 4px; background: linear-gradient(90deg, var(--border) 25%, rgba(200,200,200,0.3) 50%, var(--border) 75%); background-size: 400px 100%; animation: shimmer 1.5s infinite linear; }
+        .skeleton-label { height: 0.75rem; width: 70%; border-radius: 4px; margin-bottom: 0.75rem; background: linear-gradient(90deg, var(--border) 25%, rgba(200,200,200,0.3) 50%, var(--border) 75%); background-size: 400px 100%; animation: shimmer 1.5s infinite linear; }
+        .skeleton-value { height: 2rem; width: 50%; border-radius: 4px; background: linear-gradient(90deg, var(--border) 25%, rgba(200,200,200,0.3) 50%, var(--border) 75%); background-size: 400px 100%; animation: shimmer 1.5s infinite linear; }
         .dash-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-        .dash-table th { text-align: left; padding: 0.6rem 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--border); }
+        .dash-table th { text-align: left; padding: 0.6rem 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
         .dash-table td { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); }
         .dash-table tbody tr:last-child td { border-bottom: none; }
         .dash-table tbody tr:hover { background: rgba(126,200,227,0.06); }
         .status-badge { display: inline-block; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; text-transform: capitalize; }
         .toolbar { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
-        .toolbar input, .toolbar select { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; background: var(--bg); color: var(--text); outline: none; }
-        .toolbar input { flex: 1; min-width: 180px; max-width: 320px; }
+        .toolbar input, .toolbar select { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; background: var(--bg); color: var(--text); outline: none; min-width: 0; }
+        .toolbar input { flex: 1; min-width: 140px; max-width: 320px; }
         .toolbar input:focus, .toolbar select:focus { border-color: var(--accent); }
         .page-btn { padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); cursor: pointer; font-size: 0.85rem; }
         .page-btn:disabled { opacity: 0.4; cursor: default; }
-        .skeleton { height: 1.4rem; width: 55%; background: var(--border); border-radius: 4px; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        .table-wrap { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+        .table-wrap { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .pagination-bar { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 1rem; font-size: 0.85rem; flex-wrap: wrap; }
         .pagination-controls { display: flex; align-items: center; gap: 0.5rem; }
       `}</style>
@@ -180,17 +183,21 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="stat-grid" style={{ marginTop: "1.5rem" }}>
-              {stats.map(({ label, value, sub, accent }) => (
-                <div key={label} className="stat-card">
-                  <div className="stat-label">{label}</div>
-                  {summaryLoading ? <div className="skeleton" /> : (
-                    <>
+              {summaryLoading
+                ? Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="stat-card" aria-hidden="true">
+                      <div className="skeleton-label" />
+                      <div className="skeleton-value" />
+                    </div>
+                  ))
+                : stats.map(({ label, value, sub, accent }) => (
+                    <div key={label} className="stat-card">
+                      <div className="stat-label">{label}</div>
                       <div className="stat-value" style={accent ? { color: accent } : {}}>{value}</div>
                       {sub && <div className="stat-sub">{sub}</div>}
-                    </>
-                  )}
-                </div>
-              ))}
+                    </div>
+                  ))
+              }
             </div>
           )}
         </ErrorBoundary>
