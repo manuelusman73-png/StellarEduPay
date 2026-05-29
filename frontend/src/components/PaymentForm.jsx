@@ -176,8 +176,26 @@ export default function PaymentForm() {
                       assetIssuer: nonNative?.issuer,
                     })}
                     size={160}
-                    aria-label="Stellar payment QR code"
+                    role="img"
+                    aria-label={`QR code for Stellar payment address: ${instructions.walletAddress}`}
                   />
+                  <p style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--muted)" }}>
+                    If you cannot scan the QR code, use the address and memo below:
+                  </p>
+                  <div style={{ textAlign: "left", marginTop: "0.5rem" }}>
+                    <div style={{ marginBottom: "0.4rem" }}>
+                      <span style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Address</span>
+                      <p style={{ fontFamily: "monospace", fontSize: "0.82rem", wordBreak: "break-all", userSelect: "text", margin: "0.2rem 0 0" }}>
+                        {instructions.walletAddress}
+                      </p>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Memo</span>
+                      <p style={{ fontFamily: "monospace", fontSize: "0.82rem", userSelect: "text", margin: "0.2rem 0 0" }}>
+                        {instructions.memo}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               );
             })()}
