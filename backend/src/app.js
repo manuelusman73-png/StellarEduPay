@@ -19,6 +19,7 @@ const receiptsRoutes = require('./routes/receiptsRoutes');
 const feeAdjustmentRoutes = require('./routes/feeAdjustmentRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
+const metricsRoute = require('./routes/metricsRoute');
 
 const { registerPaymentSavedSubscribers } = require('./services/paymentSavedSubscribers');
 const { startPolling, stopPolling } = require('./services/transactionPollingService');
@@ -28,6 +29,9 @@ const { startReminderScheduler, stopReminderScheduler } = require('./services/re
 const { startWorker: startTxQueueWorker, stopWorker: stopTxQueueWorker } = require('./services/transactionQueueService');
 const { startSessionCleanupScheduler, stopSessionCleanupScheduler } = require('./services/sessionCleanupService');
 const { startReconciliationScheduler, stopReconciliationScheduler } = require('./services/reconciliationService');
+const { startAuditLogCleanupScheduler, stopAuditLogCleanupScheduler } = require('./services/auditLogCleanupService');
+const { closeQueue } = require('./queue/transactionQueue');
+const bullMQRetryService = require('./services/bullMQRetryService');
 const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
 const { notFoundHandler, globalErrorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
@@ -36,20 +40,29 @@ const { requireAdminAuth } = require('./middleware/auth');
 const { runConsistencyCheck } = require('./controllers/consistencyController');
 const { healthCheck } = require('./controllers/healthController');
 const logger = require('./utils/logger');
+const { startHeapMonitoring } = require('./utils/heapMonitoring');
 
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 const { parseAllowedOrigins } = require('./utils/corsOrigins');
 
 const allowedOrigins = parseAllowedOrigins();
 
 const app = express();
 
+// Trust the number of proxy hops configured via TRUSTED_PROXY_HOPS (default: 1).
+// This ensures Express derives req.ip from the correct X-Forwarded-For entry
+// rather than trusting client-supplied headers, which would allow rate-limit bypass.
+app.set('trust proxy', parseInt(process.env.TRUSTED_PROXY_HOPS || '1', 10));
+
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cors({
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-School-ID', 'Idempotency-Key'],
+  credentials: true,
 }));
+app.use(cookieParser());
 // The backend serves only JSON API responses — no HTML, scripts, or styles.
 // CSP directives for HTML content (scriptSrc, styleSrc, imgSrc, etc.) are
 // irrelevant here and have been removed. The frontend (Next.js) owns those.
@@ -73,6 +86,10 @@ const concurrentMiddleware = createConcurrentRequestMiddleware({
   rateLimit: { windowMs: 60000, maxRequests: 100 },
   deduplicationTtlMs: 60000,
 });
+// ── Metrics ───────────────────────────────────────────────────────────────────
+// Mounted before the rate-limiter so Prometheus scrapes are never throttled.
+app.use('/metrics', metricsRoute);
+
 app.use(concurrentMiddleware.rateLimiter((req) => req.ip));
 app.use(concurrentMiddleware.requestQueue());
 
@@ -130,6 +147,9 @@ mongoose.connection.on('error', (err) =>
 );
 
 connectWithRetry().then(async () => {
+  // Start heap monitoring to detect memory leaks early
+  startHeapMonitoring();
+
   // Seed default system config entries on first run
   const SystemConfig = require('./models/systemConfigModel');
   const DEFAULTS = [
@@ -160,6 +180,7 @@ connectWithRetry().then(async () => {
   startReminderScheduler();
   startSessionCleanupScheduler();
   startReconciliationScheduler();
+  startAuditLogCleanupScheduler();
   registerPaymentSavedSubscribers();
 
   // Only initialise BullMQ when Redis is configured
@@ -172,6 +193,7 @@ connectWithRetry().then(async () => {
       logger.error('Failed to initialize retry queue system', { error: error.message });
     }
   } else {
+    logger.warn('REDIS_HOST is not configured — using MongoDB retry backend. Rate-limit counters are in-process only and will reset on restart. Set REDIS_HOST for production deployments.');
     logger.info('All services initialized successfully (MongoDB retry backend)');
   }
 });
@@ -186,15 +208,24 @@ const server = require.main === module
 async function shutdown(signal) {
   logger.info(`Received ${signal} signal — starting graceful shutdown`);
 
-  const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 10_000;
+  const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 30_000;
 
   // Stop background services — no new work accepted
   stopPolling();
   retrySelector.stop();
-  stopTxQueueWorker();
   stopReminderScheduler();
   stopSessionCleanupScheduler();
   stopReconciliationScheduler();
+  stopAuditLogCleanupScheduler();
+
+  try {
+    await stopTxQueueWorker();
+    await closeQueue();
+    await bullMQRetryService.shutdownQueue();
+    logger.info('BullMQ resources closed cleanly');
+  } catch (err) {
+    logger.error('Error closing BullMQ resources during shutdown', { error: err.message });
+  }
 
   // Force exit after SHUTDOWN_TIMEOUT_MS regardless of in-flight requests
   const forceExitTimer = setTimeout(() => {

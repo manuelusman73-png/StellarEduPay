@@ -15,6 +15,7 @@
 
 const Student = require('../models/studentModel');
 const School  = require('../models/schoolModel');
+const Payment = require('../models/paymentModel');
 const { sendFeeReminder, verifySmtp } = require('./notificationService');
 const config = require('../config');
 const logger = require('../utils/logger').child('ReminderService');
@@ -30,11 +31,35 @@ let _running = false;
 let _lastRunAt = null;
 let _lastRunSummary = null;
 
+// Circuit breaker state
+const CIRCUIT_FAILURE_THRESHOLD = 5;
+const CIRCUIT_HALF_OPEN_AFTER_MS = 10 * 60 * 1000; // 10 minutes
+let _circuitState = 'closed'; // 'closed' | 'open' | 'half-open'
+let _consecutiveFailures = 0;
+let _circuitOpenedAt = null;
+
 /**
  * Check if SMTP is properly configured
  */
 function isSmtpConfigured() {
   return !!(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS);
+}
+
+/**
+ * Return true if the current wall-clock time in the given IANA timezone falls
+ * within business hours (08:00–17:59 local time).
+ */
+function isBusinessHours(timezone = 'UTC') {
+  const now = new Date();
+  const hour = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      hour12: false,
+      timeZone: timezone,
+    }).format(now),
+    10
+  );
+  return hour >= 8 && hour < 18;
 }
 
 /**
@@ -79,6 +104,14 @@ async function processReminders() {
   summary.schools = schools.length;
 
   for (const school of schools) {
+    const schoolTimezone = school.timezone || 'UTC';
+
+    if (!isBusinessHours(schoolTimezone)) {
+      logger.info('Outside business hours — skipping school', { schoolId: school.schoolId, timezone: schoolTimezone });
+      summary.skipped++;
+      continue;
+    }
+
     // Fetch all unpaid students in this school that have a parent email
     const unpaidStudents = await Student.find({
       schoolId:    school.schoolId,
@@ -93,16 +126,41 @@ async function processReminders() {
         continue;
       }
 
+      // Circuit breaker: check state before each send
+      if (_circuitState === 'open') {
+        if (Date.now() - _circuitOpenedAt >= CIRCUIT_HALF_OPEN_AFTER_MS) {
+          _circuitState = 'half-open';
+          logger.warn('Circuit half-open — testing email provider', { schoolId: school.schoolId });
+        } else {
+          summary.skipped++;
+          continue;
+        }
+      }
+
       summary.eligible++;
 
       try {
+        // Fresh balance check — skip if student has actually paid in full
+        const paymentAgg = await Payment.aggregate([
+          { $match: { schoolId: school.schoolId, studentId: student.studentId, deletedAt: null } },
+          { $group: { _id: null, totalPaid: { $sum: '$amount' } } },
+        ]);
+        const totalPaid = paymentAgg.length ? paymentAgg[0].totalPaid : 0;
+        const remainingBalance = Math.max(0, (student.feeAmount || 0) - totalPaid);
+
+        if (remainingBalance <= 0) {
+          summary.skipped++;
+          logger.debug('Skipping reminder — already paid', { studentId: student.studentId, schoolId: school.schoolId });
+          continue;
+        }
+
         const result = await sendFeeReminder({
           to:               student.parentEmail,
           studentName:      student.name,
           studentId:        student.studentId,
           className:        student.class,
           feeAmount:        student.feeAmount,
-          remainingBalance: student.remainingBalance,
+          remainingBalance,
           schoolName:       school.name,
           reminderCount:    (student.reminderCount || 0) + 1,
         });
@@ -114,16 +172,36 @@ async function processReminders() {
             $inc: { reminderCount: 1 },
           });
           summary.sent++;
+          // Successful send — reset circuit
+          if (_circuitState !== 'closed') {
+            _circuitState = 'closed';
+            logger.warn('Circuit closed — email provider recovered');
+          }
+          _consecutiveFailures = 0;
         } else {
           summary.skipped++;
         }
       } catch (err) {
         summary.failed++;
+        _consecutiveFailures++;
         logger.error('Failed to send reminder', {
           studentId: student.studentId,
           schoolId:  school.schoolId,
           error:     err.message,
         });
+
+        if (_consecutiveFailures >= CIRCUIT_FAILURE_THRESHOLD && _circuitState === 'closed') {
+          _circuitState = 'open';
+          _circuitOpenedAt = Date.now();
+          logger.warn('Circuit opened — too many consecutive email failures', { consecutiveFailures: _consecutiveFailures });
+          break;
+        }
+        if (_circuitState === 'half-open') {
+          _circuitState = 'open';
+          _circuitOpenedAt = Date.now();
+          logger.warn('Circuit re-opened — email provider still failing');
+          break;
+        }
       }
     }
   }
@@ -183,6 +261,8 @@ function getReminderStatus() {
     schedulerRunning: _timer !== null,
     lastRunAt: _lastRunAt,
     lastRunSummary: _lastRunSummary,
+    circuitState: _circuitState,
+    consecutiveFailures: _consecutiveFailures,
   };
 }
 

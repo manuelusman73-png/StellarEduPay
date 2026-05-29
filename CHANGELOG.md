@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Moved `nodemon` from `dependencies` to `devDependencies` in `backend/package.json` to prevent it from being installed in production Docker images (#436)
+- Added `effectiveDate` support to `FeeStructure`, updated fee selection logic and scheduler to apply future fee structures automatically; `GET /api/fees` returns current and pending structures with `isPending` flag. (Closes #927)
 
 ## [1.0.0] - 2026-04-21
 

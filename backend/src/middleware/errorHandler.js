@@ -89,7 +89,7 @@ function globalErrorHandler(err, req, res, next) {
   const statusCode =
     ERROR_STATUS_MAP[err.code] || err.status || err.statusCode || 500;
 
-  // Log error with context
+  // Always log the full stack trace internally regardless of environment
   const logContext = {
     code: err.code || "INTERNAL_ERROR",
     message: err.message,
@@ -98,24 +98,28 @@ function globalErrorHandler(err, req, res, next) {
     method: req.method,
     requestId: req.requestId,
     schoolId: req.schoolId,
+    stack: err.stack,
   };
 
   if (statusCode >= 500) {
-    logger.error("Server error", { ...logContext, stack: err.stack });
-  } else if (statusCode >= 400) {
+    logger.error("Server error", logContext);
+  } else {
     logger.warn("Client error", logContext);
   }
 
-  // Send standardized error response
-  res
-    .status(statusCode)
-    .json(
-      errorResponse(
-        err.message,
-        err.code || "INTERNAL_ERROR",
-        err.details || null,
-      ),
-    );
+  // Build the response body; include stack only in development to avoid
+  // leaking internal file paths and library versions to API clients.
+  const isDev = process.env.NODE_ENV === "development";
+  const body = errorResponse(
+    err.message,
+    err.code || "INTERNAL_ERROR",
+    err.details || null,
+  );
+  if (isDev && err.stack) {
+    body.error.stack = err.stack;
+  }
+
+  res.status(statusCode).json(body);
 }
 
 /**

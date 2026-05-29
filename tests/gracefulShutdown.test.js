@@ -67,6 +67,14 @@ jest.mock('../backend/src/config/retryQueueSetup', () => ({
   setupMonitoring: jest.fn(),
 }));
 
+jest.mock('../backend/src/queue/transactionQueue', () => ({
+  closeQueue: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../backend/src/services/bullMQRetryService', () => ({
+  shutdownQueue: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock('../backend/src/models/systemConfigModel', () => ({
   findOneAndUpdate: jest.fn().mockResolvedValue({}),
   get: jest.fn().mockResolvedValue(null),
@@ -115,10 +123,10 @@ describe('#466 graceful shutdown', () => {
     delete process.env.SHUTDOWN_TIMEOUT_MS;
   });
 
-  it('defaults to 10000ms when SHUTDOWN_TIMEOUT_MS is not set', () => {
+  it('defaults to 30000ms when SHUTDOWN_TIMEOUT_MS is not set', () => {
     delete process.env.SHUTDOWN_TIMEOUT_MS;
-    const timeout = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 10_000;
-    expect(timeout).toBe(10_000);
+    const timeout = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 30_000;
+    expect(timeout).toBe(30_000);
   });
 
   it('does not close MongoDB before in-flight request completes', async () => {

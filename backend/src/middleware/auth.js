@@ -1,6 +1,10 @@
 'use strict';
 
 const jwt = require('jsonwebtoken');
+const logger = require('../utils/logger').child('AuthMiddleware');
+const { logAudit } = require('../services/auditService');
+const { get, set } = require('../cache');
+const { sendAdminAlert } = require('../services/alertService');
 
 /**
  * requireAdminAuth — JWT-based authentication middleware for admin endpoints.
@@ -12,17 +16,58 @@ const jwt = require('jsonwebtoken');
  * On success: attaches req.admin (decoded payload) and calls next().
  * On failure: 401 (missing/invalid token) or 403 (insufficient role).
  */
-function requireAdminAuth(req, res, next) {
-  const authHeader = req.headers['authorization'];
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      error: 'Authentication required. Provide a Bearer token.',
-      code: 'MISSING_AUTH_TOKEN',
+async function requireAdminAuth(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const blockKey = `blocked_ip:${ip}`;
+  
+  if (get(blockKey)) {
+    return res.status(429).json({
+      error: 'Too many requests, IP temporarily blocked.',
+      code: 'IP_BLOCKED',
     });
   }
 
-  const token = authHeader.slice(7); // strip "Bearer "
+  const authHeader = req.headers['authorization'];
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = cookieToken || bearerToken;
+
+  const handleAuthFailure = async (reason, code) => {
+    logger.warn(`Failed admin auth attempt: ${reason} from ${ip}`, { 
+      endpoint: req.originalUrl, 
+      code 
+    });
+
+    // Use X-School-ID if available, else 'system'
+    const schoolId = req.headers['x-school-id'] || 'system';
+
+    await logAudit({
+        schoolId,
+        action: 'auth_failure',
+        performedBy: 'anonymous', 
+        targetId: 'admin_auth',
+        targetType: 'school',
+        details: { ip, endpoint: req.originalUrl, code, reason },
+        result: 'failure',
+        errorMessage: reason,
+        ipAddress: ip,
+        userAgent: req.get('user-agent'),
+    });
+
+    const failKey = `fail_count:${ip}`;
+    const failCount = (get(failKey) || 0) + 1;
+    set(failKey, failCount, 300); // 5 mins
+
+    if (failCount >= 5) {
+        set(blockKey, true, 900); // 15 mins
+        await sendAdminAlert(`IP ${ip} blocked due to repeated auth failures`, { ip, endpoint: req.originalUrl });
+    }
+
+    return res.status(401).json({ error: reason, code });
+  };
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return handleAuthFailure('Authentication required. Provide a Bearer token.', 'MISSING_AUTH_TOKEN');
+  }
 
   try {
     const secret = process.env.JWT_SECRET;
@@ -47,15 +92,9 @@ function requireAdminAuth(req, res, next) {
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        error: 'Token has expired.',
-        code: 'TOKEN_EXPIRED',
-      });
+      return handleAuthFailure('Token has expired.', 'TOKEN_EXPIRED');
     }
-    return res.status(401).json({
-      error: 'Invalid token.',
-      code: 'INVALID_AUTH_TOKEN',
-    });
+    return handleAuthFailure('Invalid token.', 'INVALID_AUTH_TOKEN');
   }
 }
 

@@ -6,7 +6,7 @@ const config = require('../config');
 const { concurrentPaymentProcessor } = require('../services/concurrentPaymentProcessor');
 const { getReminderStatus } = require('../services/reminderService');
 const { getCachedRates } = require('../services/currencyConversionService');
-const logger = require('../utils/logger');
+const { getAuditHealth } = require('../services/auditService');
 
 const STELLAR_CHECK_TIMEOUT_MS = 3000; // 3 second timeout for Stellar health check
 
@@ -107,6 +107,7 @@ async function healthCheck(req, res) {
         available: priceFeedStatus.length > 0,
         rates: priceFeedStatus,
       },
+      auditLog: getAuditHealth(),
     },
   };
 

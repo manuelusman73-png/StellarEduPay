@@ -4,6 +4,7 @@
   "scripts": {
     "test": "jest --testPathPattern=tests/ --forceExit",
     "test:integration": "cross-env RUN_INTEGRATION_TESTS=true jest tests/stellar.integration.test.js --forceExit",
+    "test:docker-healthcheck": "cross-env RUN_DOCKER_COMPOSE_HEALTHCHECK_TESTS=true jest tests/dockerComposeHealthCheck.test.js --forceExit",
     "seed": "node scripts/seed-test-data.js"
   },
   "devDependencies": {

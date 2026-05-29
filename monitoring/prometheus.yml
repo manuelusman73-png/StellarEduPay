@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: stellaredupay
+    metrics_path: /metrics
+    # Replace this with the value of METRICS_TOKEN from backend/.env
+    authorization:
+      type: Bearer
+      credentials: "change_me_to_a_secure_random_token"
+    static_configs:
+      # host.docker.internal resolves to the Docker host on Mac/Windows.
+      # On Linux it is mapped to host-gateway via extra_hosts in docker-compose.monitoring.yml.
+      - targets:
+          - "host.docker.internal:5000"

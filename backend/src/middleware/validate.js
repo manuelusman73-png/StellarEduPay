@@ -32,7 +32,7 @@ const validateCreatePaymentIntent = validate(createPaymentIntentSchema, 'body');
 const validateSubmitTransaction = validate(submitTransactionSchema, 'body');
 const validateVerifyPayment = validate(verifyPaymentSchema, 'body');
 
-const STUDENT_ID_RE = /^[A-Za-z0-9_-]{3,20}$/;
+const STUDENT_ID_RE = /^[\w-]{1,28}$/;
 
 function validStudentId(id) {
   return typeof id === 'string' && STUDENT_ID_RE.test(id);
@@ -49,8 +49,9 @@ function validTxHash(hash) {
 
 /** Middleware: validate :studentId URL param */
 function validateStudentIdParam(req, res, next) {
-  if (!validStudentId(req.params.studentId)) {
-    return res.status(400).json({ errors: [{ field: 'studentId', message: 'Invalid studentId format' }] });
+  const { studentId } = req.params;
+  if (typeof studentId !== 'string' || !STUDENT_ID_RE.test(studentId)) {
+    return res.status(400).json({ error: 'Invalid studentId format', code: 'VALIDATION_ERROR' });
   }
   return next();
 }

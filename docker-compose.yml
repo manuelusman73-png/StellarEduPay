@@ -12,6 +12,7 @@ services:
       - STELLAR_SECRET_KEY=${STELLAR_SECRET_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - NODE_OPTIONS=--max-old-space-size=400
     depends_on:
       mongo:
         condition: service_healthy
@@ -21,9 +22,10 @@ services:
       - frontend-backend
       - backend-db
     mem_limit: ${BACKEND_MEM_LIMIT:-512m}
+    memswap_limit: ${BACKEND_MEM_LIMIT:-512m}
     cpus: ${BACKEND_CPUS:-1.0}
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5000/health || exit 0"]
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

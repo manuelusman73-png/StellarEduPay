@@ -40,10 +40,9 @@ const STELLAR_NETWORK = process.env.STELLAR_NETWORK || "testnet";
 const IS_TESTNET = STELLAR_NETWORK !== "mainnet";
 
 const HORIZON_URL =
+  process.env.STELLAR_HORIZON_URL ||
   process.env.HORIZON_URL ||
-  (IS_TESTNET
-    ? "https://horizon-testnet.stellar.org"
-    : "https://horizon.stellar.org");
+  "https://horizon.stellar.org";
 
 // Optional — only used by the migration script to seed the default school
 const SCHOOL_WALLET_ADDRESS = process.env.SCHOOL_WALLET_ADDRESS || null;

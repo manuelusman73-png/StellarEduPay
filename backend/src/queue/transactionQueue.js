@@ -250,11 +250,29 @@ function startTransactionWorker(processor) {
   return worker;
 }
 
+async function closeQueue() {
+  try {
+    if (transactionQueue) {
+      await transactionQueue.close();
+      transactionQueue = null;
+      logger.info('[TransactionQueue] Queue closed');
+    }
+
+    if (connection && typeof connection.quit === 'function') {
+      await connection.quit();
+      logger.info('[TransactionQueue] Redis connection closed');
+    }
+  } catch (err) {
+    logger.error('[TransactionQueue] Failed to close queue', { error: err.message });
+  }
+}
+
 module.exports = {
   transactionQueue,
   enqueueTransaction,
   getJobStatus,
   startTransactionWorker,
+  closeQueue,
   recoverPendingJobs,
   markResolved,
   markDead,

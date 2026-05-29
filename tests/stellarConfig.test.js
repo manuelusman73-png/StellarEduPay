@@ -18,7 +18,12 @@ function loadConfig(walletAddress) {
 }
 
 describe('stellarConfig startup validation', () => {
-  afterEach(() => jest.resetModules());
+  afterEach(() => {
+    jest.resetModules();
+    jest.dontMock('@stellar/stellar-sdk');
+    delete process.env.STELLAR_HORIZON_URL;
+    delete process.env.HORIZON_URL;
+  });
 
   test('throws if SCHOOL_WALLET_ADDRESS is missing', () => {
     expect(loadConfig(undefined)).toThrow(/missing/i);
@@ -36,5 +41,32 @@ describe('stellarConfig startup validation', () => {
     expect(loadConfig(VALID_KEY)).not.toThrow();
     const cfg = require('../backend/src/config/stellarConfig');
     expect(cfg.SCHOOL_WALLET).toBe(VALID_KEY);
+  });
+
+  test('uses STELLAR_HORIZON_URL to construct the Horizon server', () => {
+    jest.resetModules();
+    process.env.MONGO_URI = 'mongodb://localhost:27017/test';
+    process.env.SCHOOL_WALLET_ADDRESS = VALID_KEY;
+    process.env.STELLAR_HORIZON_URL = 'https://horizon-testnet.stellar.org';
+
+    const mockServerCtor = jest.fn(() => ({ serverURL: 'https://horizon-testnet.stellar.org' }));
+    jest.doMock('@stellar/stellar-sdk', () => ({
+      Horizon: {
+        Server: mockServerCtor,
+      },
+      Networks: {
+        TESTNET: 'Test SDF Network ; September 2015',
+        PUBLIC: 'Public Global Stellar Network ; September 2015',
+      },
+      StrKey: {
+        isValidEd25519PublicKey: jest.fn(() => true),
+      },
+    }));
+
+    expect(() => require('../backend/src/config/stellarConfig')).not.toThrow();
+    expect(mockServerCtor).toHaveBeenCalledWith(
+      'https://horizon-testnet.stellar.org',
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
   });
 });

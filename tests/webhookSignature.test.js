@@ -1,9 +1,10 @@
 'use strict';
 
-// #468 — webhook HMAC-SHA256 signature
+// #596 — verifySignature uses crypto.timingSafeEqual instead of string comparison
 
 const crypto = require('crypto');
 
+jest.mock('axios', () => ({ post: jest.fn() }));
 jest.mock('../backend/src/models/webhookRetryModel', () => ({
   create: jest.fn().mockResolvedValue({}),
   find: jest.fn().mockResolvedValue([]),
@@ -17,7 +18,7 @@ const WebhookRetry = require('../backend/src/models/webhookRetryModel');
 
 // Intercept axios.post on the instance the service already loaded
 const axios = require('axios');
-const mockAxiosPost = jest.spyOn(axios, 'post');
+const mockAxiosPost = axios.post;
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ describe('#468 webhook HMAC signature', () => {
   });
 
   afterAll(() => {
-    mockAxiosPost.mockRestore();
+    jest.restoreAllMocks();
   });
 
   describe('generateSignature', () => {
@@ -77,6 +78,19 @@ describe('#468 webhook HMAC signature', () => {
       const sig = generateSignature(body, SECRET);
       const tampered = { ...body, data: { ...PAYLOAD, amount: 0 } };
       expect(verifySignature(tampered, sig, SECRET)).toBe(false);
+    });
+
+    it('returns false for an invalid (wrong) signature', () => {
+      const body = { event: EVENT, data: PAYLOAD };
+      const wrongSig = generateSignature(body, 'wrong-secret');
+      expect(verifySignature(body, wrongSig, SECRET)).toBe(false);
+    });
+
+    it('returns false for a signature of different length without calling timingSafeEqual', () => {
+      const body = { event: EVENT, data: PAYLOAD };
+      // A truncated hex string produces a shorter buffer
+      const shortSig = 'abcd';
+      expect(verifySignature(body, shortSig, SECRET)).toBe(false);
     });
   });
 

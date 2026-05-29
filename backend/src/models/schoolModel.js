@@ -32,6 +32,21 @@ const schoolSchema = new mongoose.Schema(
     adminEmail:     { type: String, default: null },
     address:        { type: String, default: null },
     /**
+     * Contact email for the school. Used for reminder emails, receipts, and admin notifications.
+     * Must be a valid email format.
+     */
+    contactEmail:   {
+      type: String,
+      default: null,
+      validate: {
+        validator: function(v) {
+          if (!v) return true; // Allow null/empty
+          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+        },
+        message: 'Invalid email address format',
+      },
+    },
+    /**
      * Preferred local currency for fee display (ISO 4217 code, uppercase).
      * Used by the currency conversion layer to show fiat equivalents.
      * e.g. "USD" for US schools, "PGK" for Papua New Guinea, "NGN" for Nigeria.
@@ -44,17 +59,60 @@ const schoolSchema = new mongoose.Schema(
      */
     timezone:       { type: String, default: 'UTC', trim: true },
     /**
+     * Per-school webhook endpoint URL. Must be an https:// URL that resolves
+     * to a public IP address (RFC 1918, loopback, and link-local are rejected).
+     * Validated at registration time and on each delivery attempt.
+     */
+    webhookUrl:     { type: String, default: null },
+    /**
      * Per-school HMAC secret used to sign outbound webhook deliveries.
      * Recipients verify the X-StellarEduPay-Signature header to confirm
      * the payload originated from this server and was not tampered with.
      * Generate with: crypto.randomBytes(32).toString('hex')
      */
     webhookSecret:  { type: String, default: null },
+    /**
+     * Multiplier threshold for flagging suspicious payments.
+     * Payments deviating from expected fee by more than this multiplier are flagged.
+     * E.g., multiplier=3.0 flags payments >3× or <1/3 of expected fee.
+     * Default: 3.0 (matches original hardcoded behavior).
+     * Min: 1.1 (prevents overly sensitive detection).
+     */
+    suspiciousPaymentMultiplier: {
+      type: Number,
+      default: 3.0,
+      min: [1.1, 'suspiciousPaymentMultiplier must be at least 1.1'],
+      max: [100, 'suspiciousPaymentMultiplier must not exceed 100'],
+    },
+    /**
+     * Maximum payment multiplier for this school.
+     * The maximum allowed payment is feeAmount * maxPaymentMultiplier.
+     * Allows each school to define what constitutes a suspicious overpayment.
+     * Default: 3.0 (allows payments up to 3× the fee).
+     * Min: 1.1 (must allow at least 10% overpayment).
+     * Max: 100 (prevents unreasonably high limits).
+     */
+    maxPaymentMultiplier: {
+      type: Number,
+      default: 3.0,
+      min: [1.1, 'maxPaymentMultiplier must be at least 1.1'],
+      max: [100, 'maxPaymentMultiplier must not exceed 100'],
+    },
   },
   { timestamps: true }
 );
 
 schoolSchema.index({ slug: 1 }, { unique: true });
 schoolSchema.index({ slug: 1, isActive: 1 });
+
+// toJSON transform to exclude sensitive fields
+schoolSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    delete ret.jwtSecret;
+    delete ret.webhookSecret;
+    delete ret.internalNotes;
+    return ret;
+  },
+});
 
 module.exports = mongoose.model('School', schoolSchema);

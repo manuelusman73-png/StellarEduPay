@@ -1,0 +1,56 @@
+version: "3.8"
+
+# Local development monitoring stack — Prometheus + Grafana.
+#
+# Usage:
+#   1. Set METRICS_TOKEN in backend/.env (generate with: openssl rand -hex 32)
+#   2. Copy that token into monitoring/prometheus.yml under authorization.credentials
+#   3. docker compose -f docker-compose.monitoring.yml up -d
+#
+# Prometheus: http://localhost:9090
+# Grafana:    http://localhost:3001  (admin / admin — change on first login)
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    # Allows the container to reach the backend running on the Docker host.
+    # On Linux, host-gateway resolves to the host machine's IP so that
+    # host.docker.internal works the same as on Mac/Windows Docker Desktop.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "http://localhost:3001"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:

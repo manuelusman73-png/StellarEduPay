@@ -2,6 +2,7 @@
 
 const { generateReport, reportToCsv, getDashboardMetrics } = require('../services/reportService');
 const { get, set, KEYS, TTL } = require('../cache');
+const School = require('../models/schoolModel');
 
 /**
  * GET /api/reports
@@ -32,10 +33,13 @@ async function getReport(req, res, next) {
       return next(err);
     }
 
+    const school = await School.findOne({ schoolId: req.schoolId }).lean();
+    const timezone = school?.timezone || 'UTC';
+
     const cacheKey = KEYS.report(startDate, endDate);
     let report = get(cacheKey);
     if (report === undefined) {
-      report = await generateReport({ schoolId: req.schoolId, startDate, endDate });
+      report = await generateReport({ schoolId: req.schoolId, startDate, endDate, timezone });
       set(cacheKey, report, TTL.REPORT);
     }
 
@@ -66,10 +70,13 @@ function buildFilename(startDate, endDate) {
  */
 async function getDashboard(req, res, next) {
   try {
+    const school = await School.findOne({ schoolId: req.schoolId }).lean();
+    const timezone = school?.timezone || 'UTC';
+
     const cacheKey = `dashboard:${req.schoolId}`;
     let metrics = get(cacheKey);
     if (metrics === undefined) {
-      metrics = await getDashboardMetrics({ schoolId: req.schoolId });
+      metrics = await getDashboardMetrics({ schoolId: req.schoolId, timezone });
       set(cacheKey, metrics, TTL.REPORT);
     }
     res.json(metrics);

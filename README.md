@@ -307,7 +307,7 @@ StellarEduPay is a three-tier application:
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Blockchain** | Stellar Network | Payment ledger and transaction processing |
-| **Backend** | Node.js + Express | REST API server |
+| **Backend** | Node.js 20+ + Express | REST API server |
 | **Database** | MongoDB + Mongoose | Student records and payment metadata |
 | **Frontend** | Next.js (React) | User interface |
 | **Blockchain SDK** | Stellar SDK | Horizon API integration |
@@ -322,7 +322,7 @@ StellarEduPay is a three-tier application:
 
 Before you begin, ensure you have the following installed:
 
-- **Node.js** 18 or higher ([Download](https://nodejs.org/))
+- **Node.js** 20 or higher ([Download](https://nodejs.org/)) — specified in `.nvmrc` files
 - **npm** 9 or higher (bundled with Node.js)
 - **MongoDB** 6.0 or higher, running as a **replica set** ([Download](https://www.mongodb.com/try/download/community) or use [MongoDB Atlas](https://www.mongodb.com/atlas))
 - **Git** ([Download](https://git-scm.com/downloads))
@@ -536,11 +536,34 @@ This will start:
 - Backend on port 5000
 - Frontend on port 3000
 
+For Kubernetes, a sample readiness probe is available in `deploy/k8s/backend-deployment.yaml`. It polls `/health` on port 5000 with a 30 second startup delay so traffic is only routed after the backend and MongoDB are ready.
+
 **Security Note**: MongoDB is configured with root authentication. The default credentials (root/password) should be changed in production. Generate secure passwords with:
 
 ```bash
 openssl rand -base64 32
 ```
+
+**Memory Limits**: The Docker Compose configuration includes memory limits to prevent OOM (out-of-memory) kills:
+
+| Service | Default Limit | Purpose |
+|---------|---------------|---------|
+| Backend | 512 MB | Node.js process with `--max-old-space-size=400` |
+| Frontend | 256 MB | Next.js build and runtime |
+| Redis | 128 MB | In-memory cache |
+| MongoDB | 1 GB | Database with indexes |
+
+To customize memory allocation, set environment variables before running:
+
+```bash
+export BACKEND_MEM_LIMIT=1g
+export FRONTEND_MEM_LIMIT=512m
+export REDIS_MEM_LIMIT=256m
+export MONGO_MEM_LIMIT=2g
+docker compose up --build
+```
+
+The backend includes heap monitoring that logs warnings when memory usage exceeds 80% of the configured limit. Check logs for `HEAP_USAGE_WARNING` to detect memory leaks early.
 
 ### Initial Setup: Seed Data
 

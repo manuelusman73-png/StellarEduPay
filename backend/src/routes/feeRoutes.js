@@ -11,8 +11,15 @@ const { auditContext } = require('../middleware/auditContext');
 // All fee routes require school context
 router.use(resolveSchool);
 
+const requireIncludeDeletedAccess = (req, res, next) => {
+  if (String(req.query.includeDeleted).toLowerCase() === 'true') {
+    return requireAdminAuth(req, res, next);
+  }
+  return next();
+};
+
 router.post('/',              requireAdminAuth, auditContext, validateFeeStructure, createFeeStructure);
-router.get('/',               getAllFeeStructures);
+router.get('/',               requireIncludeDeletedAccess, getAllFeeStructures);
 router.get('/:className',         getFeeByClass);
 router.put('/:className',         requireAdminAuth, auditContext, validateFeeStructure, updateFeeStructure);
 router.delete('/:className',      requireAdminAuth, auditContext, deleteFeeStructure);

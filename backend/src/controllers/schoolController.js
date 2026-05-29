@@ -4,11 +4,22 @@ const crypto = require('crypto');
 const StellarSdk = require('@stellar/stellar-sdk');
 const School = require('../models/schoolModel');
 const { logAudit } = require('../services/auditService');
+const { verifyStellarAccountFunding } = require('../services/stellarAccountVerificationService');
+const { validateWebhookUrl } = require('../utils/validateWebhookUrl');
+
+function isValidTimezone(tz) {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // POST /api/schools
 async function createSchool(req, res, next) {
   try {
-    const { name, slug, stellarAddress, network, adminEmail, address } = req.body;
+    const { name, slug, stellarAddress, network, adminEmail, address, timezone, suspiciousPaymentMultiplier } = req.body;
 
     const errors = [];
     if (!name || typeof name !== 'string' || !name.trim())
@@ -21,7 +32,22 @@ async function createSchool(req, res, next) {
       errors.push('stellarAddress must be a valid Stellar public key (Ed25519)');
     if (network && !['testnet', 'mainnet'].includes(network))
       errors.push('network must be "testnet" or "mainnet"');
+    if (suspiciousPaymentMultiplier !== undefined) {
+      if (typeof suspiciousPaymentMultiplier !== 'number' || suspiciousPaymentMultiplier < 1.1 || suspiciousPaymentMultiplier > 100) {
+        errors.push('suspiciousPaymentMultiplier must be a number between 1.1 and 100');
+      }
+    }
     if (errors.length) return res.status(400).json({ errors, code: 'VALIDATION_ERROR' });
+
+    if (timezone !== undefined && !isValidTimezone(timezone)) {
+      return res.status(400).json({
+        error: 'Invalid timezone. Must be a valid IANA timezone string (e.g. Africa/Lagos)',
+        code: 'INVALID_TIMEZONE',
+      });
+    }
+
+    // Verify Stellar account funding (non-blocking)
+    const { isFunded, warning } = await verifyStellarAccountFunding(stellarAddress);
 
     const schoolId = `SCH-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const school = await School.create({
@@ -32,6 +58,8 @@ async function createSchool(req, res, next) {
       network: network || 'testnet',
       adminEmail: adminEmail || null,
       address: address || null,
+      ...(timezone !== undefined && { timezone }),
+      ...(suspiciousPaymentMultiplier !== undefined && { suspiciousPaymentMultiplier }),
     });
 
     // Audit log
@@ -47,6 +75,11 @@ async function createSchool(req, res, next) {
         ipAddress: req.auditContext.ipAddress,
         userAgent: req.auditContext.userAgent,
       });
+    }
+
+    // Return 202 with warning if account is unfunded
+    if (warning) {
+      return res.status(202).json({ ...school.toObject(), warning });
     }
 
     res.status(201).json(school);
@@ -103,6 +136,10 @@ async function getSchool(req, res, next) {
     const school = await School.findOne({
       slug: req.params.schoolSlug.toLowerCase(),
       isActive: true,
+    }, {
+      jwtSecret: 0,
+      webhookSecret: 0,
+      internalNotes: 0,
     }).lean();
     if (!school) {
       const e = new Error('School not found');
@@ -118,7 +155,7 @@ async function getSchool(req, res, next) {
 // PATCH /api/schools/:schoolSlug
 async function updateSchool(req, res, next) {
   try {
-    const allowed = ['name', 'stellarAddress', 'network', 'adminEmail', 'address'];
+    const allowed = ['name', 'stellarAddress', 'network', 'adminEmail', 'address', 'suspiciousPaymentMultiplier'];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -132,11 +169,28 @@ async function updateSchool(req, res, next) {
       });
     }
 
+    // Validate suspiciousPaymentMultiplier if being updated
+    if (updates.suspiciousPaymentMultiplier !== undefined) {
+      if (typeof updates.suspiciousPaymentMultiplier !== 'number' || updates.suspiciousPaymentMultiplier < 1.1 || updates.suspiciousPaymentMultiplier > 100) {
+        return res.status(400).json({
+          error: 'suspiciousPaymentMultiplier must be a number between 1.1 and 100',
+          code: 'INVALID_SUSPICIOUS_PAYMENT_MULTIPLIER',
+        });
+      }
+    }
+
     const original = await School.findOne({ slug: req.params.schoolSlug.toLowerCase(), isActive: true }).lean();
     if (!original) {
       const e = new Error('School not found');
       e.code = 'NOT_FOUND';
       return next(e);
+    }
+
+    // Verify Stellar account funding if address is being updated (non-blocking)
+    let warning = null;
+    if (updates.stellarAddress) {
+      const { isFunded, warning: fundingWarning } = await verifyStellarAccountFunding(updates.stellarAddress);
+      warning = fundingWarning;
     }
 
     const school = await School.findOneAndUpdate(
@@ -158,6 +212,11 @@ async function updateSchool(req, res, next) {
         ipAddress: req.auditContext.ipAddress,
         userAgent: req.auditContext.userAgent,
       });
+    }
+
+    // Return 202 with warning if account is unfunded
+    if (warning) {
+      return res.status(202).json({ ...school.toObject(), warning });
     }
 
     res.json(school);
@@ -274,4 +333,50 @@ async function activateSchool(req, res, next) {
   }
 }
 
-module.exports = { createSchool, getAllSchools, getSchool, updateSchool, deactivateSchool, deactivateSchoolEndpoint, activateSchool };
+// POST /api/schools/:slug/webhooks
+async function registerWebhook(req, res, next) {
+  try {
+    const { webhookUrl } = req.body;
+
+    if (!webhookUrl || typeof webhookUrl !== 'string') {
+      return res.status(400).json({ error: 'webhookUrl is required', code: 'VALIDATION_ERROR' });
+    }
+
+    const validation = await validateWebhookUrl(webhookUrl);
+    if (!validation.valid) {
+      return res.status(400).json({ error: 'webhookUrl must use https:// and resolve to a public IP address', code: 'INVALID_WEBHOOK_URL' });
+    }
+
+    const school = await School.findOneAndUpdate(
+      { slug: req.params.slug, isActive: true },
+      { webhookUrl },
+      { new: true }
+    );
+
+    if (!school) {
+      const e = new Error('School not found');
+      e.code = 'NOT_FOUND';
+      return next(e);
+    }
+
+    if (req.auditContext) {
+      await logAudit({
+        schoolId: school.schoolId,
+        action: 'school_webhook_register',
+        performedBy: req.auditContext.performedBy,
+        targetId: school.schoolId,
+        targetType: 'school',
+        details: { webhookUrl },
+        result: 'success',
+        ipAddress: req.auditContext.ipAddress,
+        userAgent: req.auditContext.userAgent,
+      });
+    }
+
+    res.json({ webhookUrl: school.webhookUrl });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createSchool, getAllSchools, getSchool, updateSchool, deactivateSchool, deactivateSchoolEndpoint, activateSchool, registerWebhook };

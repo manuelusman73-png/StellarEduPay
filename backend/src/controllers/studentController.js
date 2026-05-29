@@ -40,6 +40,14 @@ async function registerStudent(req, res, next) {
       class: className,
     });
 
+    // Always validate that a fee structure exists for the class (#663)
+    if (className) {
+      const feeStructure = await FeeStructure.findOne({ schoolId, className, deletedAt: null });
+      if (!feeStructure) {
+        return res.status(400).json({ error: `No fee structure found for class "${className}"`, code: 'FEE_STRUCTURE_NOT_FOUND' });
+      }
+    }
+
     let assignedFee = feeAmount;
     let assignedDeadline = null;
     if (assignedFee == null && className) {
@@ -331,18 +339,28 @@ async function getPaymentSummary(req, res, next) {
 
 const CSV_MAX_SIZE_BYTES = parseInt(process.env.CSV_MAX_SIZE_BYTES, 10) || 5 * 1024 * 1024; // 5 MB
 const CSV_MAX_ROWS = parseInt(process.env.CSV_MAX_ROWS, 10) || 10000;
+const CSV_MAX_COLUMNS = parseInt(process.env.CSV_MAX_COLUMNS, 10) || 20;
 
 function parseCsvBuffer(buffer) {
   return new Promise((resolve, reject) => {
     const rows = [];
     const stream = Readable.from(buffer);
+    let lineNumber = 1;
     stream
       .pipe(csv())
       .on('data', (row) => {
+        lineNumber++;
         if (rows.length >= CSV_MAX_ROWS) {
           stream.destroy();
           const err = new Error(`CSV exceeds maximum row limit of ${CSV_MAX_ROWS}`);
           err.code = 'CSV_TOO_MANY_ROWS';
+          err.status = 400;
+          return reject(err);
+        }
+        if (Object.keys(row).length > CSV_MAX_COLUMNS) {
+          stream.destroy();
+          const err = new Error(`Row ${lineNumber} has too many columns. Max is ${CSV_MAX_COLUMNS}`);
+          err.code = 'CSV_INVALID_FORMAT';
           err.status = 400;
           return reject(err);
         }
@@ -677,30 +695,4 @@ async function reconcileStudent(req, res, next) {
   }
 }
 
-async function getFeeHistory(req, res, next) {
-  try {
-    const { schoolId } = req;
-    const { studentId } = req.params;
-
-    const student = await Student.findOne({ schoolId, studentId, deletedAt: null });
-    if (!student)
-      return res.status(404).json({ error: 'Student not found', code: 'NOT_FOUND' });
-
-    const StudentFeeHistory = require('../models/studentFeeHistoryModel');
-    const archived = await StudentFeeHistory
-      .find({ schoolId, studentId })
-      .sort({ archivedAt: -1 })
-      .lean();
-
-    return res.json({
-      studentId,
-      activeFees: student.fees || [],
-      archivedFees: archived,
-      total: (student.fees?.length || 0) + archived.length,
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
-module.exports = { registerStudent, getAllStudents, getStudent, updateStudent, deleteStudent, getPaymentSummary, bulkImportStudents, getOverdueStudents, resetPayment, reconcileStudent, getFeeHistory };
+module.exports = { registerStudent, getAllStudents, getStudent, updateStudent, deleteStudent, getPaymentSummary, bulkImportStudents, getOverdueStudents, resetPayment, reconcileStudent, parseCsvBuffer };

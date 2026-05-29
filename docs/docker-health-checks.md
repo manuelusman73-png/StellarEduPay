@@ -30,7 +30,7 @@ The backend service uses the `/health` endpoint which checks both database and S
 
 ```yaml
 healthcheck:
-  test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/health"]
+  test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
   interval: 10s
   timeout: 5s
   retries: 5

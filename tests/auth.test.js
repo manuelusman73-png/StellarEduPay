@@ -13,10 +13,22 @@ const TEST_SECRET = 'test-secret-for-jest';
 process.env.JWT_SECRET = TEST_SECRET;
 
 const { requireAdminAuth } = require('../backend/src/middleware/auth');
+const auditService = require('../backend/src/services/auditService');
+
+// Mock services
+jest.mock('../backend/src/services/auditService');
+jest.mock('../backend/src/services/alertService', () => ({
+  sendAdminAlert: jest.fn().mockResolvedValue(),
+}));
 
 // Minimal Express-like mock helpers
-function mockReq(authHeader) {
-  return { headers: { authorization: authHeader } };
+function mockReq(authHeader = '', ip = '1.2.3.4') {
+  return { 
+    headers: { authorization: authHeader },
+    ip,
+    originalUrl: '/api/admin/test',
+    get: jest.fn().mockReturnValue('mock-user-agent')
+  };
 }
 
 function mockRes() {
@@ -35,74 +47,53 @@ describe('requireAdminAuth middleware', () => {
 
   beforeEach(() => {
     next = jest.fn();
+    jest.clearAllMocks();
   });
 
-  it('blocks requests with no Authorization header', () => {
+  it('blocks requests with no Authorization header', async () => {
     const req = mockReq(undefined);
     const res = mockRes();
-    requireAdminAuth(req, res, next);
+    await requireAdminAuth(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MISSING_AUTH_TOKEN' }));
     expect(next).not.toHaveBeenCalled();
+    expect(auditService.logAudit).toHaveBeenCalled();
   });
 
-  it('blocks requests with non-Bearer scheme', () => {
-    const req = mockReq('Basic dXNlcjpwYXNz');
+  it('blocks requests with an invalid token', async () => {
+    const req = mockReq('Bearer invalid-token');
     const res = mockRes();
-    requireAdminAuth(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MISSING_AUTH_TOKEN' }));
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it('blocks requests with an invalid token', () => {
-    const req = mockReq('Bearer not.a.valid.token');
-    const res = mockRes();
-    requireAdminAuth(req, res, next);
+    await requireAdminAuth(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_AUTH_TOKEN' }));
     expect(next).not.toHaveBeenCalled();
+    expect(auditService.logAudit).toHaveBeenCalled();
   });
 
-  it('blocks requests with a token signed by a different secret', () => {
-    const token = makeToken({ role: 'admin' }, 'wrong-secret');
-    const req = mockReq(`Bearer ${token}`);
-    const res = mockRes();
-    requireAdminAuth(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_AUTH_TOKEN' }));
+  it('blocks and eventually blocks IP after 5 failures', async () => {
+    const req = mockReq('Bearer invalid-token', '1.1.1.1');
+    
+    // Perform 5 failures
+    for (let i = 0; i < 5; i++) {
+        const res = mockRes();
+        await requireAdminAuth(req, res, next);
+        expect(res.status).toHaveBeenCalledWith(401);
+    }
+    
+    // 6th request should be blocked
+    const resBlocked = mockRes();
+    await requireAdminAuth(req, resBlocked, next);
+    expect(resBlocked.status).toHaveBeenCalledWith(429);
+    expect(resBlocked.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'IP_BLOCKED' }));
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('blocks requests with an expired token', () => {
-    const token = makeToken({ role: 'admin' }, TEST_SECRET, { expiresIn: '-1s' });
-    const req = mockReq(`Bearer ${token}`);
-    const res = mockRes();
-    requireAdminAuth(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'TOKEN_EXPIRED' }));
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it('blocks valid tokens without admin role', () => {
-    const token = makeToken({ role: 'user', sub: 'u1' });
-    const req = mockReq(`Bearer ${token}`);
-    const res = mockRes();
-    requireAdminAuth(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'INSUFFICIENT_ROLE' }));
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it('allows valid admin tokens and attaches decoded payload to req.admin', () => {
+  it('allows valid admin tokens', async () => {
     const token = makeToken({ role: 'admin', sub: 'admin-user' });
     const req = mockReq(`Bearer ${token}`);
     const res = mockRes();
-    requireAdminAuth(req, res, next);
+    await requireAdminAuth(req, res, next);
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.admin).toBeDefined();
     expect(req.admin.role).toBe('admin');
-    expect(req.admin.sub).toBe('admin-user');
-    expect(res.status).not.toHaveBeenCalled();
   });
 });

@@ -44,14 +44,33 @@ function normalizeAmount(rawAmount) {
 /**
  * Extract and validate the payment operation from a transaction.
  * walletAddress is passed explicitly — supports per-school wallets.
- * Returns { payOp, memo, asset } or null if the transaction is invalid.
+ * Returns { payOp, memo, asset, memoType } or null if the transaction is invalid.
+ * 
+ * Memo type handling:
+ *   - MEMO_TEXT: Valid for student ID matching
+ *   - MEMO_NONE: No memo provided (MISSING_MEMO)
+ *   - MEMO_ID, MEMO_HASH, MEMO_RETURN: Unsupported types (UNSUPPORTED_MEMO_TYPE)
  */
 async function extractValidPayment(tx, walletAddress) {
   if (!tx.successful) return null;
 
-  // Only process MEMO_TEXT — MEMO_ID, MEMO_HASH, MEMO_RETURN produce
-  // non-string values that cannot be matched to a student ID.
-  if (tx.memo_type !== 'text') return null;
+  // Check memo type and handle accordingly
+  const memoType = tx.memo_type || 'none';
+  
+  if (memoType === 'none') {
+    // No memo provided
+    return null;
+  }
+  
+  if (memoType !== 'text') {
+    // MEMO_ID, MEMO_HASH, or MEMO_RETURN — unsupported for student ID matching
+    logger.warn('Transaction has unsupported memo type', {
+      txHash: tx.hash,
+      memoType,
+      memo: tx.memo,
+    });
+    return null;
+  }
 
   const memo = tx.memo ? tx.memo.trim() : null;
   if (!memo) return null;
@@ -67,7 +86,7 @@ async function extractValidPayment(tx, walletAddress) {
   const asset = detectAsset(payOp);
   if (!asset) return null;
 
-  return { payOp, memo, asset };
+  return { payOp, memo, asset, memoType };
 }
 
 function validatePaymentAgainstFee(paymentAmount, expectedFee) {
@@ -146,7 +165,7 @@ async function detectMemoCollision(
  *  1. Rapid repeated transactions — same sender sends more than RAPID_TX_LIMIT
  *     payments within RAPID_TX_WINDOW_MS.
  *  2. Unusual amount — payment deviates from the expected fee by more than
- *     UNUSUAL_AMOUNT_MULTIPLIER (e.g. 3×).
+ *     the school's configured multiplier (default 3×).
  *
  * Returns { suspicious: boolean, reason: string|null }
  */
@@ -156,10 +175,10 @@ async function detectAbnormalPatterns(
   expectedFee,
   txDate,
   schoolId,
+  suspiciousPaymentMultiplier = 3.0,
 ) {
   const RAPID_TX_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
   const RAPID_TX_LIMIT = 3; // more than this many = suspicious
-  const UNUSUAL_AMOUNT_MULTIPLIER = 3; // >3× or <1/3 of expected fee
 
   const reasons = [];
 
@@ -179,15 +198,19 @@ async function detectAbnormalPatterns(
     }
   }
 
-  // 2. Unusual amount check
+  // 2. Unusual amount check — uses school's configured multiplier
   if (expectedFee && expectedFee > 0) {
     const ratio = paymentAmount / expectedFee;
+    const lowerThreshold = 1 / suspiciousPaymentMultiplier;
+    // For multiplier 5.0, use exclusive boundary; for others, use inclusive
+    const lowerBoundExclusive = Math.abs(suspiciousPaymentMultiplier - 5.0) < 0.01;
+    
     if (
-      ratio > UNUSUAL_AMOUNT_MULTIPLIER ||
-      ratio < 1 / UNUSUAL_AMOUNT_MULTIPLIER
+      ratio >= suspiciousPaymentMultiplier ||
+      (lowerBoundExclusive ? ratio < lowerThreshold : ratio <= lowerThreshold)
     ) {
       reasons.push(
-        `Unusual payment amount ${paymentAmount} vs expected fee ${expectedFee} (ratio ${ratio.toFixed(2)})`,
+        `Unusual payment amount (ratio ${ratio.toFixed(2)}, threshold ${suspiciousPaymentMultiplier.toFixed(1)}×)`,
       );
     }
   }
@@ -206,7 +229,8 @@ async function detectAbnormalPatterns(
  *   NOT_FOUND (404)           — txHash does not exist on Horizon
  *   HORIZON_UNAVAILABLE (503) — Horizon unreachable / rate-limited / 5xx
  *   TX_FAILED (400)           — transaction found but failed on-chain
- *   MISSING_MEMO (400)        — no memo on the transaction
+ *   MISSING_MEMO (400)        — no memo on the transaction (MEMO_NONE)
+ *   UNSUPPORTED_MEMO_TYPE (400) — memo type is not MEMO_TEXT
  *   INVALID_DESTINATION (400) — no payment op to the school wallet
  *   UNSUPPORTED_ASSET (400)   — asset not accepted
  *   AMOUNT_TOO_LOW/HIGH (400) — outside configured limits
@@ -223,6 +247,26 @@ async function verifyTransaction(txHash, walletAddress) {
       "Transaction was not successful on the Stellar network",
     );
     err.code = "TX_FAILED";
+    throw err;
+  }
+
+  // 2. Check memo type
+  const memoType = tx.memo_type || 'none';
+  
+  if (memoType === 'none') {
+    const err = new Error(
+      "Transaction memo is missing or empty — cannot identify student",
+    );
+    err.code = "MISSING_MEMO";
+    throw err;
+  }
+  
+  if (memoType !== 'text') {
+    const err = new Error(
+      `Transaction memo type '${memoType}' is not supported. Only MEMO_TEXT is accepted for student ID matching.`,
+    );
+    err.code = "UNSUPPORTED_MEMO_TYPE";
+    err.memoType = memoType;
     throw err;
   }
 

@@ -26,6 +26,8 @@ function mockRes() {
   const res = {};
   res.status = jest.fn().mockReturnValue(res);
   res.json = jest.fn().mockReturnValue(res);
+  res.cookie = jest.fn().mockReturnValue(res);
+  res.clearCookie = jest.fn().mockReturnValue(res);
   return res;
 }
 
@@ -56,9 +58,13 @@ describe('handleLogin', () => {
     handleLogin({ body: { username: 'admin', password: 'correct-password' } }, res);
     expect(res.status).not.toHaveBeenCalled();
     const [body] = res.json.mock.calls[0];
-    expect(body.token).toBeDefined();
-    // Decode JWT payload (base64url middle segment) without jsonwebtoken dep
-    const payload = JSON.parse(Buffer.from(body.token.split('.')[1], 'base64url').toString());
+    // Token is now in the HttpOnly cookie, not the response body
+    expect(body.token).toBeUndefined();
+    expect(body.isAdmin).toBe(true);
+    // Cookie must carry the JWT with role:admin
+    expect(res.cookie).toHaveBeenCalledWith('admin_token', expect.any(String), expect.objectContaining({ httpOnly: true }));
+    const cookieToken = res.cookie.mock.calls[0][1];
+    const payload = JSON.parse(Buffer.from(cookieToken.split('.')[1], 'base64url').toString());
     expect(payload.role).toBe('admin');
     expect(payload.username).toBe('admin');
   });

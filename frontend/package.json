@@ -1,6 +1,9 @@
 {
   "name": "stellaredupay-frontend",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,7 +16,8 @@
     "next": "^14.0.0",
     "qrcode.react": "^4.2.0",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react-dom": "^18.0.0",
+    "react-window": "1.8.10"
   },
   "devDependencies": {
     "eslint": "^8.0.0",

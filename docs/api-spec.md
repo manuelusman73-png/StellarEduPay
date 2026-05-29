@@ -140,6 +140,7 @@ Authorization: Bearer <token>
 | `network` | string | No — `testnet` (default) or `mainnet` |
 | `adminEmail` | string | No |
 | `localCurrency` | string | No — ISO 4217 code, default `USD` |
+| `timezone` | string | No — IANA timezone identifier, default `UTC`. Used for date grouping in reports and reminder scheduling. Examples: `Africa/Lagos`, `America/New_York`, `Asia/Singapore`. Must be a valid IANA timezone string; invalid values return `400 INVALID_TIMEZONE`. |
 
 **Response `201`** — created school object.
 

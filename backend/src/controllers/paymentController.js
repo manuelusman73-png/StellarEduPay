@@ -37,6 +37,7 @@ const {
 } = require("../services/currencyConversionService");
 const { withStellarRetry } = require("../utils/withStellarRetry");
 const { logAudit } = require("../services/auditService");
+const { syncDurationSeconds } = require("../metrics");
 
 // Permanent error codes that should NOT be retried
 const PERMANENT_FAIL_CODES = [
@@ -743,8 +744,10 @@ async function syncAllPayments(req, res, next) {
     return res.status(409).json({ error: "Sync already in progress", code: "SYNC_IN_PROGRESS" });
   }
   _syncLocks.add(schoolId);
+  const stopSyncTimer = syncDurationSeconds.startTimer();
   try {
     const summary = await syncPaymentsForSchool(req.school);
+    stopSyncTimer();
 
     // Audit log
     if (req.auditContext) {
@@ -789,6 +792,7 @@ async function syncAllPayments(req, res, next) {
         userAgent: req.auditContext.userAgent,
       });
     }
+    stopSyncTimer();
     next(wrapStellarError(err));
   } finally {
     _syncLocks.delete(schoolId);
@@ -936,15 +940,26 @@ async function getPaymentLimitsEndpoint(req, res, next) {
 
 async function getOverpayments(req, res, next) {
   try {
-    const overpayments = await Payment.find({
-      schoolId: req.schoolId,
-      feeValidationStatus: "overpaid",
-    }).sort({ confirmedAt: -1 });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const skip = (page - 1) * limit;
+
+    const filter = { schoolId: req.schoolId, feeValidationStatus: "overpaid" };
+    const [total, overpayments] = await Promise.all([
+      Payment.countDocuments(filter),
+      Payment.find(filter).sort({ confirmedAt: -1 }).skip(skip).limit(limit),
+    ]);
+
     const totalExcess = overpayments.reduce(
       (sum, p) => sum + (p.excessAmount || 0),
       0,
     );
-    res.json({ count: overpayments.length, totalExcess, overpayments });
+    res.json({
+      count: overpayments.length,
+      totalExcess,
+      overpayments,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }
@@ -1083,11 +1098,35 @@ async function getSuspiciousPayments(req, res, next) {
 
 async function getPendingPayments(req, res, next) {
   try {
-    const pending = await Payment.find({
+    const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const skip = (pageNum - 1) * pageSize;
+
+    const filter = {
       schoolId: req.schoolId,
       confirmationStatus: "pending_confirmation",
-    }).sort({ confirmedAt: -1 });
-    res.json({ count: pending.length, pending });
+    };
+
+    const [pending, total] = await Promise.all([
+      Payment.find(filter)
+        .sort({ confirmedAt: -1 })
+        .skip(skip)
+        .limit(pageSize),
+      Payment.countDocuments(filter),
+    ]);
+
+    res.json({
+      count: pending.length,
+      pending,
+      pagination: {
+        page: pageNum,
+        limit: pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+        hasNext: pageNum < Math.ceil(total / pageSize),
+        hasPrev: pageNum > 1,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -1570,6 +1609,11 @@ async function updatePaymentStatus(req, res, next) {
 
     if (!newStatus || !reason) {
       return res.status(400).json({ error: 'status and reason are required', code: 'VALIDATION_ERROR' });
+    }
+
+    // Prevent transitioning to PENDING from any state
+    if (newStatus === 'PENDING') {
+      return res.status(400).json({ error: 'Cannot transition to PENDING', code: 'INVALID_TRANSITION' });
     }
 
     const payment = await Payment.findOne({ schoolId: req.schoolId, txHash }).lean();

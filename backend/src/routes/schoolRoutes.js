@@ -10,6 +10,7 @@ const {
   deactivateSchool,
   deactivateSchoolEndpoint,
   activateSchool,
+  registerWebhook,
 } = require('../controllers/schoolController');
 const { requireAdminAuth } = require('../middleware/auth');
 const { auditContext } = require('../middleware/auditContext');
@@ -26,5 +27,8 @@ router.delete('/:schoolId',     requireAdminAuth, auditContext, deactivateSchool
 // Explicit activate / deactivate endpoints
 router.patch('/:schoolId/deactivate', requireAdminAuth, auditContext, deactivateSchoolEndpoint);
 router.patch('/:schoolId/activate',   requireAdminAuth, auditContext, activateSchool);
+
+// Webhook registration — validates URL for SSRF safety before storing
+router.post('/:slug/webhooks', requireAdminAuth, auditContext, registerWebhook);
 
 module.exports = router;

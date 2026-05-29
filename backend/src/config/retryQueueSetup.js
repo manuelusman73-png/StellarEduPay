@@ -33,7 +33,7 @@ async function initializeRetryQueue(app) {
       console.log('[RetryQueueSetup] Routes registered at /api/retry-queue');
     }
     
-    // Setup graceful shutdown
+    // Main application manages process signal handling to avoid duplicate shutdown paths.
     setupGracefulShutdown();
     
     isInitialized = true;
@@ -54,31 +54,7 @@ async function initializeRetryQueue(app) {
  * Setup graceful shutdown handlers
  */
 function setupGracefulShutdown() {
-  const { shutdownQueue } = bullMQRetryService;
-  
-  // Handle process termination
-  process.on('SIGTERM', async () => {
-    console.log('[RetryQueueSetup] SIGTERM received, shutting down gracefully...');
-    await gracefulShutdown();
-    process.exit(0);
-  });
-  
-  process.on('SIGINT', async () => {
-    console.log('[RetryQueueSetup] SIGINT received, shutting down gracefully...');
-    await gracefulShutdown();
-    process.exit(0);
-  });
-  
-  process.on('uncaughtException', async (error) => {
-    console.error('[RetryQueueSetup] Uncaught exception:', error);
-    await gracefulShutdown();
-    process.exit(1);
-  });
-  
-  process.on('unhandledRejection', async (reason, promise) => {
-    console.error('[RetryQueueSetup] Unhandled rejection at:', promise, 'reason:', reason);
-    // Don't exit for unhandled rejections, just log them
-  });
+  console.log('[RetryQueueSetup] Main application manages process shutdown; skipping duplicate signal handlers');
 }
 
 /**

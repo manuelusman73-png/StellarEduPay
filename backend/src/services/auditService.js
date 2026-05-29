@@ -1,6 +1,23 @@
 'use strict';
 
 const AuditLog = require('../models/auditLogModel');
+const logger = require('../utils/logger');
+
+// In-process failure counter — reset on restart (acceptable for single-process deployments)
+let _auditFailureCount = 0;
+
+/** Returns the current audit log failure count and health status. */
+function getAuditHealth() {
+  return {
+    status: _auditFailureCount === 0 ? 'ok' : 'degraded',
+    recentFailures: _auditFailureCount,
+  };
+}
+
+/** Exposed for testing only. */
+function _resetAuditFailureCount() {
+  _auditFailureCount = 0;
+}
 
 /**
  * logAudit — creates an audit log entry for admin actions.
@@ -43,8 +60,9 @@ async function logAudit({
       userAgent,
     });
   } catch (err) {
-    // Log audit failures but don't block the main operation
-    console.error('[AuditService] Failed to create audit log:', err.message);
+    // Do NOT re-throw — audit failure must not break the primary operation
+    _auditFailureCount += 1;
+    logger.error('AUDIT_LOG_FAILURE', { err, schoolId, action });
   }
 }
 
@@ -121,4 +139,4 @@ async function getRecentAuditLogs(schoolId, limit = 10) {
     .lean();
 }
 
-module.exports = { logAudit, getAuditLogs, getRecentAuditLogs };
+module.exports = { logAudit, getAuditLogs, getRecentAuditLogs, getAuditHealth, _resetAuditFailureCount };

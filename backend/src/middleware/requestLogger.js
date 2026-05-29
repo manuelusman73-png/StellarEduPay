@@ -19,6 +19,7 @@
  */
 
 const { logger } = require('../utils/logger');
+const { httpRequestDurationSeconds } = require('../metrics');
 
 const DEFAULT_REDACT_FIELDS = ['txHash', 'studentId', 'memo', 'senderAddress'];
 
@@ -90,6 +91,14 @@ function requestLogger() {
         durationMs,
         ip,
       });
+
+      // Normalise to the matched route pattern (e.g. /api/payments/:id) so high-cardinality
+      // path parameters don't explode the label set. Falls back to the raw path on 404s.
+      const route = req.route ? req.baseUrl + req.route.path : req.path;
+      httpRequestDurationSeconds.observe(
+        { method: req.method, route, status: String(res.statusCode) },
+        durationMs / 1000
+      );
     });
 
     next();

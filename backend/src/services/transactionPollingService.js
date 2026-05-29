@@ -71,7 +71,7 @@ async function processTransaction(tx, school) {
 
   // Check for suspicious activity
   const collision = await detectMemoCollision(memo, senderAddress, paymentAmount, student.feeAmount, txDate, schoolId);
-  const abnormal = await detectAbnormalPatterns(senderAddress, paymentAmount, student.feeAmount, txDate, schoolId);
+  const abnormal = await detectAbnormalPatterns(senderAddress, paymentAmount, student.feeAmount, txDate, schoolId, school.suspiciousPaymentMultiplier);
   
   const isSuspicious = collision.suspicious || abnormal.suspicious;
   const suspicionReason = [collision.reason, abnormal.reason].filter(Boolean).join('; ') || null;
