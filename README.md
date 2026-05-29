@@ -307,7 +307,7 @@ StellarEduPay is a three-tier application:
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Blockchain** | Stellar Network | Payment ledger and transaction processing |
-| **Backend** | Node.js + Express | REST API server |
+| **Backend** | Node.js 20+ + Express | REST API server |
 | **Database** | MongoDB + Mongoose | Student records and payment metadata |
 | **Frontend** | Next.js (React) | User interface |
 | **Blockchain SDK** | Stellar SDK | Horizon API integration |
@@ -322,7 +322,7 @@ StellarEduPay is a three-tier application:
 
 Before you begin, ensure you have the following installed:
 
-- **Node.js** 18 or higher ([Download](https://nodejs.org/))
+- **Node.js** 20 or higher ([Download](https://nodejs.org/)) — specified in `.nvmrc` files
 - **npm** 9 or higher (bundled with Node.js)
 - **MongoDB** 6.0 or higher, running as a **replica set** ([Download](https://www.mongodb.com/try/download/community) or use [MongoDB Atlas](https://www.mongodb.com/atlas))
 - **Git** ([Download](https://git-scm.com/downloads))

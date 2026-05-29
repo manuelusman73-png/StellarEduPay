@@ -84,6 +84,20 @@ const schoolSchema = new mongoose.Schema(
       min: [1.1, 'suspiciousPaymentMultiplier must be at least 1.1'],
       max: [100, 'suspiciousPaymentMultiplier must not exceed 100'],
     },
+    /**
+     * Maximum payment multiplier for this school.
+     * The maximum allowed payment is feeAmount * maxPaymentMultiplier.
+     * Allows each school to define what constitutes a suspicious overpayment.
+     * Default: 3.0 (allows payments up to 3× the fee).
+     * Min: 1.1 (must allow at least 10% overpayment).
+     * Max: 100 (prevents unreasonably high limits).
+     */
+    maxPaymentMultiplier: {
+      type: Number,
+      default: 3.0,
+      min: [1.1, 'maxPaymentMultiplier must be at least 1.1'],
+      max: [100, 'maxPaymentMultiplier must not exceed 100'],
+    },
   },
   { timestamps: true }
 );

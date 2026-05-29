@@ -49,6 +49,57 @@ function validatePaymentAmount(amount) {
 }
 
 /**
+ * Validate payment amount against school-specific maximum multiplier.
+ * The maximum allowed payment is feeAmount * school.maxPaymentMultiplier.
+ * 
+ * @param {number} paymentAmount - The payment amount to validate
+ * @param {number} feeAmount - The expected fee amount
+ * @param {number} maxPaymentMultiplier - School's max payment multiplier (default: 3.0)
+ * @returns {Object} - { valid: boolean, error?: string, code?: string }
+ */
+function validatePaymentAmountAgainstFee(paymentAmount, feeAmount, maxPaymentMultiplier = 3.0) {
+  // Ensure amounts are valid numbers
+  if (typeof paymentAmount !== 'number' || isNaN(paymentAmount)) {
+    return {
+      valid: false,
+      error: 'Payment amount must be a valid number',
+      code: 'INVALID_AMOUNT',
+    };
+  }
+
+  if (typeof feeAmount !== 'number' || isNaN(feeAmount) || feeAmount <= 0) {
+    return {
+      valid: false,
+      error: 'Fee amount must be a valid positive number',
+      code: 'INVALID_FEE',
+    };
+  }
+
+  // Check if amount is positive
+  if (paymentAmount <= 0) {
+    return {
+      valid: false,
+      error: 'Payment amount must be greater than zero',
+      code: 'INVALID_AMOUNT',
+    };
+  }
+
+  // Calculate maximum allowed payment
+  const maxAllowed = feeAmount * maxPaymentMultiplier;
+
+  // Check if payment exceeds school's maximum multiplier
+  if (paymentAmount > maxAllowed) {
+    return {
+      valid: false,
+      error: `Payment amount ${paymentAmount} exceeds the maximum allowed amount of ${maxAllowed} (${maxPaymentMultiplier}× the fee of ${feeAmount})`,
+      code: 'AMOUNT_TOO_HIGH',
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Get the current payment limits configuration.
  * 
  * @returns {Object} - { min: number, max: number }
@@ -62,5 +113,6 @@ function getPaymentLimits() {
 
 module.exports = {
   validatePaymentAmount,
+  validatePaymentAmountAgainstFee,
   getPaymentLimits,
 };

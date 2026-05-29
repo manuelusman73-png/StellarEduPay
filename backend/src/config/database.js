@@ -48,6 +48,15 @@ const RETRY_CONFIG = {
   maxRetryDelayMs: parseInt(process.env.DB_MAX_RETRY_DELAY_MS || '5000', 10),
 };
 
+// ── Startup Connection Retry Configuration ──────────────────────────────────────
+const STARTUP_RETRY_CONFIG = {
+  // Maximum number of retry attempts on startup (default: 5)
+  maxRetries: parseInt(process.env.MONGODB_CONNECT_RETRIES || '5', 10),
+  
+  // Initial retry delay in milliseconds (default: 2000)
+  initialDelayMs: parseInt(process.env.MONGODB_CONNECT_DELAY_MS || '2000', 10),
+};
+
 // ── Transaction Configuration ───────────────────────────────────────────────────
 const TRANSACTION_CONFIG = {
   // Read concern level for transactions
@@ -210,9 +219,65 @@ async function connect() {
   logger.info('[MongoDB] Initiating connection', {
     uri: MONGO_URI.replace(/\/\/.*@/, '//<credentials>@'), // Hide credentials
     poolConfig: POOL_CONFIG,
+    startupRetries: STARTUP_RETRY_CONFIG.maxRetries,
+    startupRetryDelayMs: STARTUP_RETRY_CONFIG.initialDelayMs,
   });
 
-  return connectWithRetry(MONGO_URI, options);
+  return connectWithStartupRetry(MONGO_URI, options);
+}
+
+// ── Connect with Startup Retry Logic ────────────────────────────────────────────
+async function connectWithStartupRetry(uri, options = {}, retryCount = 0) {
+  try {
+    connectionState.isConnecting = true;
+    await mongoose.connect(uri, {
+      ...options,
+      // Pool configuration
+      maxPoolSize: POOL_CONFIG.maxPoolSize,
+      minPoolSize: POOL_CONFIG.minPoolSize,
+      maxIdleTimeMS: POOL_CONFIG.maxIdleTimeMS,
+      // Timeout configuration
+      connectTimeoutMS: POOL_CONFIG.connectTimeoutMS,
+      socketTimeoutMS: POOL_CONFIG.socketTimeoutMS,
+      // Server selection
+      serverSelectionTimeoutMS: POOL_CONFIG.serverSelectionTimeoutMS,
+      // Retry configuration
+      retryWrites: true,
+      retryReads: true,
+      w: 'majority',
+    });
+    connectionState.isConnecting = false;
+    logger.info('[MongoDB] Connected successfully on startup', {
+      attempt: retryCount + 1,
+      totalAttempts: STARTUP_RETRY_CONFIG.maxRetries,
+    });
+    return mongoose.connection;
+  } catch (error) {
+    connectionState.isConnecting = false;
+    connectionState.reconnectAttempts = retryCount + 1;
+
+    // Check if we should retry
+    const isTransientError = isTransientConnectionError(error);
+    
+    if (isTransientError && retryCount < STARTUP_RETRY_CONFIG.maxRetries - 1) {
+      const delay = STARTUP_RETRY_CONFIG.initialDelayMs * Math.pow(2, retryCount);
+      logger.warn(`[MongoDB] Connection failed on startup, retrying in ${delay}ms...`, {
+        attempt: retryCount + 1,
+        maxRetries: STARTUP_RETRY_CONFIG.maxRetries,
+        error: error.message,
+      });
+      
+      await sleep(delay);
+      return connectWithStartupRetry(uri, options, retryCount + 1);
+    }
+
+    logger.error('[MongoDB] Connection failed permanently on startup', {
+      attempts: retryCount + 1,
+      maxRetries: STARTUP_RETRY_CONFIG.maxRetries,
+      error: error.message,
+    });
+    throw error;
+  }
 }
 
 // ── Graceful Disconnect ────────────────────────────────────────────────────────
@@ -292,6 +357,7 @@ const databaseConfig = {
   getConnection,
   POOL_CONFIG,
   RETRY_CONFIG,
+  STARTUP_RETRY_CONFIG,
   TRANSACTION_CONFIG,
   mongoose,
 };
