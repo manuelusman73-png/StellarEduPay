@@ -30,6 +30,13 @@ let _running = false;
 let _lastRunAt = null;
 let _lastRunSummary = null;
 
+// Circuit breaker state
+const CIRCUIT_FAILURE_THRESHOLD = 5;
+const CIRCUIT_HALF_OPEN_AFTER_MS = 10 * 60 * 1000; // 10 minutes
+let _circuitState = 'closed'; // 'closed' | 'open' | 'half-open'
+let _consecutiveFailures = 0;
+let _circuitOpenedAt = null;
+
 /**
  * Check if SMTP is properly configured
  */
@@ -118,6 +125,17 @@ async function processReminders() {
         continue;
       }
 
+      // Circuit breaker: check state before each send
+      if (_circuitState === 'open') {
+        if (Date.now() - _circuitOpenedAt >= CIRCUIT_HALF_OPEN_AFTER_MS) {
+          _circuitState = 'half-open';
+          logger.warn('Circuit half-open — testing email provider', { schoolId: school.schoolId });
+        } else {
+          summary.skipped++;
+          continue;
+        }
+      }
+
       summary.eligible++;
 
       try {
@@ -139,16 +157,36 @@ async function processReminders() {
             $inc: { reminderCount: 1 },
           });
           summary.sent++;
+          // Successful send — reset circuit
+          if (_circuitState !== 'closed') {
+            _circuitState = 'closed';
+            logger.warn('Circuit closed — email provider recovered');
+          }
+          _consecutiveFailures = 0;
         } else {
           summary.skipped++;
         }
       } catch (err) {
         summary.failed++;
+        _consecutiveFailures++;
         logger.error('Failed to send reminder', {
           studentId: student.studentId,
           schoolId:  school.schoolId,
           error:     err.message,
         });
+
+        if (_consecutiveFailures >= CIRCUIT_FAILURE_THRESHOLD && _circuitState === 'closed') {
+          _circuitState = 'open';
+          _circuitOpenedAt = Date.now();
+          logger.warn('Circuit opened — too many consecutive email failures', { consecutiveFailures: _consecutiveFailures });
+          break;
+        }
+        if (_circuitState === 'half-open') {
+          _circuitState = 'open';
+          _circuitOpenedAt = Date.now();
+          logger.warn('Circuit re-opened — email provider still failing');
+          break;
+        }
       }
     }
   }
@@ -208,6 +246,8 @@ function getReminderStatus() {
     schedulerRunning: _timer !== null,
     lastRunAt: _lastRunAt,
     lastRunSummary: _lastRunSummary,
+    circuitState: _circuitState,
+    consecutiveFailures: _consecutiveFailures,
   };
 }
 

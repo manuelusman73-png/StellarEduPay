@@ -40,6 +40,14 @@ async function registerStudent(req, res, next) {
       class: className,
     });
 
+    // Always validate that a fee structure exists for the class (#663)
+    if (className) {
+      const feeStructure = await FeeStructure.findOne({ schoolId, className, deletedAt: null });
+      if (!feeStructure) {
+        return res.status(400).json({ error: `No fee structure found for class "${className}"`, code: 'FEE_STRUCTURE_NOT_FOUND' });
+      }
+    }
+
     let assignedFee = feeAmount;
     let assignedDeadline = null;
     if (assignedFee == null && className) {
