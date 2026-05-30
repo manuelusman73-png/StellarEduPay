@@ -161,6 +161,31 @@ async function updateSchool(req, res, next) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
 
+    // Issue #670: Step-up authentication for stellarAddress changes
+    if (updates.stellarAddress) {
+      const expectedPassword = process.env.ADMIN_PASSWORD;
+      const providedPassword = req.body.confirmPassword;
+
+      if (!expectedPassword || !providedPassword) {
+        return res.status(403).json({
+          error: 'Password confirmation required for stellarAddress change',
+          code: 'STEP_UP_REQUIRED',
+        });
+      }
+
+      // Constant-time comparison to prevent timing attacks
+      const crypto = require('crypto');
+      const bufExpected = Buffer.from(expectedPassword);
+      const bufProvided = Buffer.from(providedPassword);
+      
+      if (bufExpected.length !== bufProvided.length || !crypto.timingSafeEqual(bufExpected, bufProvided)) {
+        return res.status(403).json({
+          error: 'Password confirmation required for stellarAddress change',
+          code: 'STEP_UP_REQUIRED',
+        });
+      }
+    }
+
     // Validate stellarAddress if being updated
     if (updates.stellarAddress && !StellarSdk.StrKey.isValidEd25519PublicKey(updates.stellarAddress)) {
       return res.status(400).json({
@@ -199,15 +224,19 @@ async function updateSchool(req, res, next) {
       { new: true, runValidators: true }
     );
 
-    // Audit log
+    // Audit log — mark stellarAddress changes as high-severity
     if (req.auditContext) {
       await logAudit({
         schoolId: school.schoolId,
-        action: 'school_update',
+        action: updates.stellarAddress ? 'school_update_stellar_address' : 'school_update',
         performedBy: req.auditContext.performedBy,
         targetId: school.schoolId,
         targetType: 'school',
-        details: { before: original, after: updates },
+        details: { 
+          before: original, 
+          after: updates,
+          severity: updates.stellarAddress ? 'high' : 'normal',
+        },
         result: 'success',
         ipAddress: req.auditContext.ipAddress,
         userAgent: req.auditContext.userAgent,
