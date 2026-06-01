@@ -124,6 +124,7 @@ async function processPendingVerifications() {
         const result = await verifyTransaction(
           item.txHash,
           school.stellarAddress,
+          item.schoolId,
         );
 
         if (!result) {

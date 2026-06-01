@@ -11,13 +11,15 @@ const paymentEvents = require("../events/paymentEvents");
  * data must include schoolId.
  */
 async function savePayment(data) {
+  const lookupHash = data.txHash || data.transactionHash;
   const exists = await Payment.findOne({
-    transactionHash: data.transactionHash,
+    schoolId: data.schoolId,
+    txHash: lookupHash,
     deletedAt: null,
   });
   if (exists) {
     const err = new Error(
-      `Transaction ${data.transactionHash} has already been processed`,
+      `Transaction ${lookupHash} has already been processed`,
     );
     err.code = "DUPLICATE_TX";
     throw err;
@@ -32,18 +34,18 @@ async function savePayment(data) {
   } catch (e) {
     if (e.code === 11000) {
       const err = new Error(
-        `Transaction ${data.transactionHash} has already been processed`,
+        `Transaction ${lookupHash} has already been processed`,
       );
       err.code = "DUPLICATE_TX";
       logger.warn("Duplicate transaction rejected", {
-        txHash: data.transactionHash,
+        txHash: lookupHash,
         schoolId: data.schoolId,
       });
       throw err;
     }
     logger.error("Failed to record payment", {
       error: e.message,
-      txHash: data.transactionHash,
+      txHash: lookupHash,
       schoolId: data.schoolId,
     });
     throw e;
