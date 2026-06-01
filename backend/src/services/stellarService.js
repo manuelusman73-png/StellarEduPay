@@ -240,7 +240,7 @@ async function detectAbnormalPatterns(
  *   UNSUPPORTED_ASSET (400)   — asset not accepted
  *   AMOUNT_TOO_LOW/HIGH (400) — outside configured limits
  */
-async function verifyTransaction(txHash, walletAddress) {
+async function verifyTransaction(txHash, walletAddress, schoolId) {
   const tx = await withStellarRetry(
     () => server.transactions().transaction(txHash).call(),
     { label: "verifyTransaction" },
@@ -323,9 +323,8 @@ async function verifyTransaction(txHash, walletAddress) {
     throw err;
   }
 
-  // 6. Look up student to validate fee (student lookup is not school-scoped here
-  //    since memo = studentId; recordPayment caller passes schoolId explicitly)
-  const student = await Student.findOne({ studentId: memo });
+  // 6. Look up student to validate fee — scoped by schoolId to prevent cross-school data leakage
+  const student = await Student.findOne({ schoolId, studentId: memo });
   const feeAmount = student ? student.feeAmount : null;
 
   const feeValidation =

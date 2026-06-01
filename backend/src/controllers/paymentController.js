@@ -468,6 +468,7 @@ async function verifyPayment(req, res, next) {
       result = await verifyTransaction(
         normalizedHash,
         req.school.stellarAddress,
+        req.schoolId,
       );
     } catch (stellarErr) {
       if (PERMANENT_FAIL_CODES.includes(stellarErr.code)) {
